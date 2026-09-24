@@ -190,7 +190,10 @@ function sampleEntropy(bytes: Uint8Array, offset: number, length: number): numbe
   const end = Math.min(bytes.length, offset + length);
   if (end <= offset) return 0;
   const histogram = new Uint32Array(256);
-  for (let i = offset; i < end; i++) histogram[bytes[i] ?? 0]++;
+  for (let i = offset; i < end; i++) {
+    const b = bytes[i] ?? 0;
+    histogram[b] = (histogram[b] ?? 0) + 1;
+  }
   const total = end - offset;
   let entropy = 0;
   for (let i = 0; i < 256; i++) {

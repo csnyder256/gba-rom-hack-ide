@@ -64,7 +64,10 @@ export function shannonEntropy(bytes: Uint8Array, start: number, length: number)
   const actual = end - start;
   if (actual <= 0) return 0;
   const hist = new Uint32Array(256);
-  for (let i = start; i < end; i++) hist[bytes[i] ?? 0]++;
+  for (let i = start; i < end; i++) {
+    const b = bytes[i] ?? 0;
+    hist[b] = (hist[b] ?? 0) + 1;
+  }
   let h = 0;
   for (let i = 0; i < 256; i++) {
     const c = hist[i] ?? 0;
@@ -105,7 +108,10 @@ export function findHighEntropyRegions(
   const regions: EntropyRegion[] = [];
   // Rolling histogram seeded with the first window's bytes.
   const hist = new Uint32Array(256);
-  for (let i = start; i < start + windowSize; i++) hist[bytes[i] ?? 0]++;
+  for (let i = start; i < start + windowSize; i++) {
+    const b = bytes[i] ?? 0;
+    hist[b] = (hist[b] ?? 0) + 1;
+  }
 
   let inRegion = false;
   let regionStart = 0;
@@ -152,8 +158,8 @@ export function findHighEntropyRegions(
     for (let i = 0; i < stepSize; i++) {
       const leaving = bytes[windowStart + i] ?? 0;
       const entering = bytes[windowStart + windowSize + i] ?? 0;
-      hist[leaving]--;
-      hist[entering]++;
+      hist[leaving] = (hist[leaving] ?? 0) - 1;
+      hist[entering] = (hist[entering] ?? 0) + 1;
     }
     windowStart = nextStart;
   }

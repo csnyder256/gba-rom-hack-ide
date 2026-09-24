@@ -135,7 +135,10 @@ export function profileBytes(bytes: Uint8Array, start: number, length: number): 
     });
   }
   const hist = new Uint32Array(256);
-  for (let i = start; i < end; i++) hist[bytes[i] ?? 0]++;
+  for (let i = start; i < end; i++) {
+    const b = bytes[i] ?? 0;
+    hist[b] = (hist[b] ?? 0) + 1;
+  }
 
   // Entropy.
   let entropy = 0;
