@@ -161,6 +161,45 @@ describe('applyEdits', () => {
     expect(await read('inside.h')).toBe('Route 1\n');
   });
 
+  it('rejects an edit that leaves the root through a symbolic link, and leaves the target alone', async (ctx) => {
+    const outside = await fsp.mkdtemp(path.join(tmpdir(), 'patch-applier-outside-'));
+    const target = path.join(outside, 'not-yours.h');
+    await fsp.writeFile(target, 'Route 1\n', 'utf8');
+    try {
+      await fsp.symlink(target, path.join(root, 'linked.h'));
+    } catch {
+      // Creating symbolic links needs extra privileges on some Windows setups.
+      await fsp.rm(outside, { recursive: true, force: true });
+      ctx.skip();
+      return;
+    }
+    let caught: PatchApplyError | undefined;
+    try {
+      await applyEdits(root, [
+        { kind: 'replace_in_file', filePath: 'linked.h', before: 'Route 1', after: 'Route 2' },
+      ]);
+    } catch (e) {
+      caught = e as PatchApplyError;
+    }
+    expect(caught?.code).toBe('unsafe_path');
+    expect(await fsp.readFile(target, 'utf8')).toBe('Route 1\n');
+    await fsp.rm(outside, { recursive: true, force: true });
+  });
+
+  it('still edits through a symbolic link that stays inside the root', async (ctx) => {
+    await seed('real.h', 'Route 1\n');
+    try {
+      await fsp.symlink(path.join(root, 'real.h'), path.join(root, 'alias.h'));
+    } catch {
+      ctx.skip();
+      return;
+    }
+    await applyEdits(root, [
+      { kind: 'replace_in_file', filePath: 'alias.h', before: 'Route 1', after: 'Route 2' },
+    ]);
+    expect(await read('real.h')).toBe('Route 2\n');
+  });
+
   it('reverse edits round-trip - applying then undoing leaves the file untouched', async () => {
     const original = 'gFlyText[FLY_ROUTE1] = _("Route 1");\nbattle("Route 1 trainer");\n';
     // Make it unique so the test isolates the single-replace logic; we'll do

@@ -229,6 +229,24 @@ async function applyReplaceInFile(
       `Edit path '${edit.filePath}' resolves outside the project root.`,
     );
   }
+  // The check above is lexical and cannot see symbolic links. A project on
+  // disk (a cloned decomp repo, say) can contain a link whose target lies
+  // outside the root; reading and writing through it would edit that file
+  // instead. Repeat the containment check on the real paths. A file that
+  // does not exist is left for the read below to report.
+  const realTarget = await fsp.realpath(absPath).catch(() => undefined);
+  if (realTarget !== undefined) {
+    const realRoot = await fsp.realpath(projectRoot).catch(() => projectRoot);
+    const realRel = path.relative(realRoot, realTarget);
+    if (realRel.startsWith('..') || path.isAbsolute(realRel)) {
+      throw new PatchApplyError(
+        'unsafe_path',
+        editIndex,
+        edit.filePath,
+        `Edit path '${edit.filePath}' leaves the project root through a symbolic link.`,
+      );
+    }
+  }
   let content: string;
   try {
     content = await fsp.readFile(absPath, 'utf8');
