@@ -19,6 +19,11 @@ import { runEngineOnRom } from './engine-client.js';
  * coverage (Cat 1..15) against the same `WorkspaceModel` output.
  */
 describe('runEngineOnRom - PD 13 substrate (editor backend ↔ engine wire)', () => {
+  // A full engine pass over a 16 MiB ROM takes several minutes on CI
+  // hardware (about 345 s in node:22). vitest 1.x never enforced the old
+  // 30 s timeout on a test that blocks the event loop, so it looked
+  // fine; vitest 2+ does, and correctly fails it. The budget below is
+  // the real one.
   it('returns a populated WorkspaceModel for a FireRed-shaped synthetic ROM', async () => {
     const rom = fixtures.buildSyntheticRom({
       title: 'POKEMON FIRE',
@@ -60,7 +65,7 @@ describe('runEngineOnRom - PD 13 substrate (editor backend ↔ engine wire)', ()
     // IngestReport carried through.
     expect(result.ingestReport.summary.totalDetectors).toBeGreaterThanOrEqual(14);
     expect(result.ingestReport.coverage.regions.length).toBeGreaterThan(0);
-  }, 30_000);
+  }, 900_000);
 
   it('returns unrecognized family for an unknown-game-code synthetic ROM', async () => {
     const rom = fixtures.buildSyntheticRom({
