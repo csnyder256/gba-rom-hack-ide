@@ -1171,10 +1171,14 @@ function wireMarker(
       // No drag support - pointerdown still acts as click via pointertap.
       return;
     }
+    // pixi.js types `parent` as nullable: a graphic that has been removed
+    // from the scene has nothing to measure against, so it cannot be dragged.
+    const parent = g.parent;
+    if (!parent) return;
     dragging = true;
     movedDuringPress = false;
     g.cursor = 'grabbing';
-    const local = e.getLocalPosition(g.parent);
+    const local = e.getLocalPosition(parent);
     pressOffsetX = local.x - g.x;
     pressOffsetY = local.y - g.y;
     e.stopPropagation();
@@ -1182,7 +1186,9 @@ function wireMarker(
 
   g.on('globalpointermove', (e: import('pixi.js').FederatedPointerEvent) => {
     if (!dragging) return;
-    const local = e.getLocalPosition(g.parent);
+    const parent = g.parent;
+    if (!parent) return;
+    const local = e.getLocalPosition(parent);
     const nextX = local.x - pressOffsetX;
     const nextY = local.y - pressOffsetY;
     if (nextX !== g.x || nextY !== g.y) movedDuringPress = true;
