@@ -1,0 +1,43 @@
+# Keep dependencies and CI actions patched. CI (engine + app on Linux and
+# Windows, smoke test, tile-intel-svc) gates every Dependabot PR.
+#
+# app/ is one npm workspace (shared, backend, frontend) with a single
+# lockfile, so it is watched once at /app; listing each workspace as its own
+# directory produces duplicate PRs for every shared package. The engine has
+# its own lockfile. tile-intel-svc is managed by uv (uv.lock).
+#
+# Routine bumps are grouped: one PR per ecosystem per week. Majors arrive
+# one at a time because they deserve a separate read.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/app"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      app-minor-and-patch:
+        update-types: ["minor", "patch"]
+  - package-ecosystem: "npm"
+    directory: "/engine"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      engine-minor-and-patch:
+        update-types: ["minor", "patch"]
+  - package-ecosystem: "uv"
+    directory: "/tile-intel-svc"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      tile-intel-minor-and-patch:
+        update-types: ["minor", "patch"]
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns: ["*"]
