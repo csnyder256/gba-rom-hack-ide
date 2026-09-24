@@ -12,7 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@fastify/static": "7.0.4",
+    "@fastify/static": "10.1.4",
     "@fastify/websocket": "10.0.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@rom-editor/shared": "*",
