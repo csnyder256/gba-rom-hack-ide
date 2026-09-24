@@ -14,18 +14,18 @@
   "dependencies": {
     "@fastify/static": "7.0.4",
     "@fastify/websocket": "10.0.1",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@rom-editor/shared": "*",
     "@rom-introspection/engine": "file:../../engine",
     "fastify": "4.28.1",
-    "yauzl": "^3.3.0",
-    "zod": "^4.4.3"
+    "yauzl": "^3.4.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "22.5.5",
     "@types/ws": "^8.18.1",
-    "@types/yauzl": "^2.10.3",
-    "tsx": "4.19.1",
+    "@types/yauzl": "^3.4.0",
+    "tsx": "4.23.15",
     "typescript": "5.4.5",
     "vitest": "1.6.1"
   }
