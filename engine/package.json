@@ -33,7 +33,7 @@
   },
   "devDependencies": {
     "@types/node": "22.5.5",
-    "@vitest/coverage-v8": "1.6.0",
+    "@vitest/coverage-v8": "5.0.1",
     "typescript": "5.4.5",
     "vitest": "1.6.0"
   },
