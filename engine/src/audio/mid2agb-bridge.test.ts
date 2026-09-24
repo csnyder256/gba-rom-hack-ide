@@ -8,7 +8,10 @@ import { locateMid2agb, runMid2agb } from './mid2agb-bridge.js';
  * actual converter.
  */
 
-describe('locateMid2agb (Phase 5.1)', () => {
+// locateMid2agb shells out to `where`/`which` once per candidate name. On
+// GitHub's Windows runners a cold `where` can take seconds, which made these
+// tests trip vitest's 5 s default at random.
+describe('locateMid2agb (Phase 5.1)', { timeout: 30_000 }, () => {
   it('returns a structured result regardless of installation state', async () => {
     const result = await locateMid2agb();
     expect(result).toBeDefined();
