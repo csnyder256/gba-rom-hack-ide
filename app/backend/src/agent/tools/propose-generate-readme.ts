@@ -10,7 +10,8 @@
  *   - DPE's clause when the project is on the `firered-cfru-dpe` fork
  *
  * Output: writes README.md to `<outputPath>` (defaults to
- * `<projectRoot>/share/README.md`).
+ * `<projectRoot>/share/README.md`). The path must stay inside the
+ * project root, symbolic links included.
  *
  * The agent supplies the hack-specific copy (description, features,
  * known issues); the tool stitches it together with the boilerplate
@@ -21,6 +22,7 @@ import { z } from 'zod';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import { readManifest } from '../../scan/manifest-io.js';
+import { resolveInsideProject } from '../project-path.js';
 import type { ToolContext } from '../types.js';
 
 export const PROPOSE_GENERATE_README_TOOL_NAME = 'propose_generate_readme';
@@ -36,7 +38,7 @@ export const PROPOSE_GENERATE_README_DESCRIPTION =
   '  - `features`: bullet list of headline features.\n' +
   '  - `knownIssues`: bullet list of known limitations.\n' +
   '  - `outputPath`: optional override (default\n' +
-  '    `<projectRoot>/share/README.md`).\n\n' +
+  '    `<projectRoot>/share/README.md`); must stay inside the project.\n\n' +
   'The tool stitches in: project stats from the manifest, story-spec\n' +
   'cast/acts (if .editor/story-spec.md exists), the CFRU non-\n' +
   'monetization clause, and (if applicable) the DPE attribution.';
@@ -157,7 +159,17 @@ export async function proposeGenerateReadme(
   lines.push(`*Patch generated ${new Date().toISOString().split('T')[0]} by the ROM editor.*`);
 
   const markdown = lines.join('\n');
-  const out = args.outputPath ?? path.join(ctx.projectRoot, 'share', 'README.md');
+  const requested = args.outputPath ?? path.join('share', 'README.md');
+  const out = await resolveInsideProject(ctx.projectRoot, requested);
+  if (out === null) {
+    return {
+      ok: false,
+      writtenPath: null,
+      bytes: 0,
+      preview: markdown.slice(0, 500),
+      message: `Refusing to write README at ${requested}: the path leaves the project root.`,
+    };
+  }
   try {
     await fsp.mkdir(path.dirname(out), { recursive: true });
     await fsp.writeFile(out, markdown, 'utf8');

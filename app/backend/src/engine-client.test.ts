@@ -19,11 +19,11 @@ import { runEngineOnRom } from './engine-client.js';
  * coverage (Cat 1..15) against the same `WorkspaceModel` output.
  */
 describe('runEngineOnRom - PD 13 substrate (editor backend ↔ engine wire)', () => {
-  // A full engine pass over a 16 MiB ROM takes several minutes on CI
-  // hardware (about 345 s in node:22). vitest 1.x never enforced the old
-  // 30 s timeout on a test that blocks the event loop, so it looked
-  // fine; vitest 2+ does, and correctly fails it. The budget below is
-  // the real one.
+  // A full engine pass over a 16 MiB ROM takes minutes: 215-270 s on
+  // GitHub's runners, about 345 s in a local node:22 container. vitest
+  // 1.x never enforced the old 30 s timeout on a test that blocks the
+  // event loop, so it looked fine; vitest 2+ does, and correctly fails
+  // it. The budget below is the real one.
   it('returns a populated WorkspaceModel for a FireRed-shaped synthetic ROM', async () => {
     const rom = fixtures.buildSyntheticRom({
       title: 'POKEMON FIRE',
