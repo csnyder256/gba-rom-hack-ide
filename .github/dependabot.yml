@@ -38,11 +38,15 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@types/react-dom"
         update-types: ["version-update:semver-major"]
-      # Fastify 5 is a backend migration, and the @fastify/* plugin majors
-      # (@fastify/static 8+, @fastify/websocket 11+) require it.
-      - dependency-name: "fastify"
+      # vitest 5 in app/ is a test migration, not a bump: the frontend's
+      # jest-dom matcher setup no longer type-checks (toBeInTheDocument is
+      # unknown) and ~290 frontend tests fail, and the backend's engine-client
+      # round-trip test stops finishing. The engine is already on vitest 5.
+      # The remaining vitest advisory only applies while `vitest --ui` serves,
+      # which this project never runs.
+      - dependency-name: "vitest"
         update-types: ["version-update:semver-major"]
-      - dependency-name: "@fastify/*"
+      - dependency-name: "@vitest/*"
         update-types: ["version-update:semver-major"]
       # TypeScript 7 is the native compiler and removes options; move it
       # deliberately, with typescript-eslint.
