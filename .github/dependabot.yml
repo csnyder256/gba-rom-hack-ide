@@ -6,8 +6,12 @@
 # directory produces duplicate PRs for every shared package. The engine has
 # its own lockfile. tile-intel-svc is managed by uv (uv.lock).
 #
-# Routine bumps are grouped: one PR per ecosystem per week. Majors arrive
-# one at a time because they deserve a separate read.
+# Routine bumps are grouped: one PR per ecosystem per week. Packages that
+# must move in lockstep (vitest and its plugins, the vite toolchain) are
+# grouped at every version. Majors that are migrations rather than bumps are
+# held below, each with what has to happen first; delete an entry when that
+# migration lands and Dependabot resumes normally. Other majors arrive one
+# at a time.
 version: 2
 updates:
   - package-ecosystem: "npm"
@@ -16,16 +20,53 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 5
     groups:
+      # vitest 5 needs vite >= 6.4, @vitejs/plugin-react 6 needs vite >= 7,
+      # and @vitest/* must match vitest exactly. Moved one at a time, each of
+      # these fails for a reason that is really another package's version.
+      vite-toolchain:
+        patterns: ["vite", "@vitejs/*", "vitest", "@vitest/*", "jsdom"]
       app-minor-and-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # React 19 is a migration for the frontend (types, testing-library,
+      # the pixi.js and mgba-wasm integrations), not a bump.
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react-dom"
+        update-types: ["version-update:semver-major"]
+      # Fastify 5 is a backend migration, and the @fastify/* plugin majors
+      # (@fastify/static 8+, @fastify/websocket 11+) require it.
+      - dependency-name: "fastify"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@fastify/*"
+        update-types: ["version-update:semver-major"]
+      # TypeScript 7 is the native compiler and removes options; move it
+      # deliberately, with typescript-eslint.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # engines pins node ">=22.0.0 <23"; types track that runtime.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: "npm"
     directory: "/engine"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
     groups:
+      # @vitest/coverage-v8 must match vitest exactly.
+      vitest:
+        patterns: ["vitest", "@vitest/*"]
       engine-minor-and-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: "uv"
     directory: "/tile-intel-svc"
     schedule:
