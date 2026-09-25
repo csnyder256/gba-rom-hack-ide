@@ -70,6 +70,9 @@ interface VoiceCardSummary {
 }
 
 async function loadVoiceCard(projectRoot: string, characterId: string): Promise<{ path: string; summary: VoiceCardSummary } | null> {
+  // Same id rule propose_character_voice_card enforces when it writes the
+  // card; anything else (a '../' path, say) cannot name one.
+  if (!/^[a-z0-9_-]+$/i.test(characterId)) return null;
   const file = path.join(projectRoot, '.editor', 'voices', `${characterId}.md`);
   try {
     const md = await fsp.readFile(file, 'utf8');
