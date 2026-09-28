@@ -124,6 +124,51 @@ describe('Gen-3 text codec - encodeString', () => {
     const dec = decodeString(enc, 0, 32);
     expect(dec).toBe(original);
   });
+
+  it('encodes the multi-character control-code placeholders the decoder emits', () => {
+    // The app's own help text tells users to type \p / \l / {CC} / {VAR}
+    // straight into a dialogue box, so the encoder has to accept exactly
+    // what the decoder produces. Before this, `{` and `\` had no mapping
+    // and every write of a string carrying a control code threw.
+    expect(Array.from(encodeString('\\p'))).toEqual([0xfa]);
+    expect(Array.from(encodeString('\\l'))).toEqual([0xfb]);
+    expect(Array.from(encodeString('{CC}'))).toEqual([0xfc]);
+    expect(Array.from(encodeString('{VAR}'))).toEqual([0xfd]);
+  });
+
+  it('encodes a realistic dialogue line mixing text, newline and control codes', () => {
+    const line = 'Hello!\nWelcome to the {VAR} region.\\pEnjoy!';
+    const enc = encodeString(line);
+    expect(enc[0]).toBe(0xc2); // H (0xbb + 7)
+    expect(enc[6]).toBe(0xfe); // newline
+    // The \p sits in the middle, right before "Enjoy!" - find it and check
+    // that exactly one byte stands in for the two-glyph placeholder.
+    const markerIdx = Array.from(enc).indexOf(0xfa);
+    expect(markerIdx).toBeGreaterThan(0);
+    expect(decodeString(enc, markerIdx + 1, 6)).toBe('Enjoy!');
+    expect(decodeString(enc, 0, enc.length)).toBe(line);
+  });
+
+  it('is the exact inverse of decodeString for every byte the decoder can emit', () => {
+    // The strongest statement of the contract: for every byte that has a
+    // real mapping, encodeString(decodeByte(b)) must give back b. Bytes
+    // outside the charmap decode to the shared placeholder '?' and are
+    // lossy by design, so they are checked separately.
+    const roundTrippable: string[] = [];
+    for (let b = 0x00; b < 0xff; b++) {
+      const ch = decodeByte(b);
+      if (ch === '?') continue;
+      expect(Array.from(encodeString(ch))).toEqual([b]);
+      roundTrippable.push(ch);
+    }
+    // And the whole alphabet concatenated still round-trips byte-for-byte,
+    // which catches any greedy-placeholder mis-splitting across a boundary.
+    const encodedWhole = Array.from(encodeString(roundTrippable.join('')));
+    expect(encodedWhole.length).toBe(roundTrippable.length);
+    expect(decodeString(new Uint8Array(encodedWhole), 0, encodedWhole.length)).toBe(
+      roundTrippable.join(''),
+    );
+  });
 });
 
 describe('Gen-3 text codec - STRING_TERMINATOR constant', () => {

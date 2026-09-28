@@ -273,6 +273,35 @@ describe('applyEdits - binary_replace_text', () => {
     }
   });
 
+  it('writes a replacement containing control codes the decoder itself emits', async () => {
+    // Regression: `binary_replace_text` end-to-end. The editor decodes a
+    // ROM string, the user edits it (or types the documented \p / {VAR}
+    // shorthand straight in), and the applier re-encodes it. Before the
+    // codec fix, `after` containing \p or {VAR} threw "Cannot encode
+    // character '\'" / "'{'" and the write was impossible - the decoder
+    // emitted a placeholder the encoder could not read back.
+    await seedRom([{ offset: 0x900, text: 'HELLO THERE' }]); // 11 + terminator = 12 bytes
+    const result = await applyEdits(root, [
+      {
+        kind: 'binary_replace_text',
+        textOffset: 0x900,
+        before: 'HELLO THERE',
+        after: 'HI\\pBYE', // 4 text + \p (2 glyphs -> 1 byte) + 3 text = 8 bytes
+      },
+    ]);
+    expect(result.appliedCount).toBe(1);
+    const buf = await fsp.readFile(path.join(root, ROM_NAME));
+    // "HI" then the single \p control byte (0xFA) then "BYE".
+    expect(buf[0x900]).toBe(0xc2); // H
+    expect(buf[0x900 + 2]).toBe(0xfa); // \p
+    expect(text.decodeString(buf, 0x900, 16)).toBe('HI\\pBYE');
+    // And the write is reversible, control code included.
+    await applyEdits(root, [...result.reverseEdits]);
+    expect(text.decodeString(await fsp.readFile(path.join(root, ROM_NAME)), 0x900, 16)).toBe(
+      'HELLO THERE',
+    );
+  });
+
   it('rejects after-text that encodes longer than the original slot', async () => {
     await seedRom([{ offset: 0x800, text: 'ROUTE 1' }]); // 7 + terminator = 8 bytes
     let caught: PatchApplyError | undefined;
