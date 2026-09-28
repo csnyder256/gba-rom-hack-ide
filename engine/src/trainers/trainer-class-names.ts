@@ -217,15 +217,15 @@ export function validateTrainerClassNames(names: ReadonlyArray<string>): boolean
  * PD 5: structural - works on any Gen-3 cart.
  */
 export function findTrainerClassNamesTable(romBytes: Uint8Array): TrainerClassNamesTable | null {
-  const maxSlotBytes = Math.max(...TRAINER_CLASS_NAME_SLOT_CANDIDATES);
+  const minSlotBytes = Math.min(...TRAINER_CLASS_NAME_SLOT_CANDIDATES);
   if (
     romBytes.byteLength <
     CARTRIDGE_HEADER_END +
-      TRAINER_CLASS_NAMES_MIN_VALID_SLOTS * maxSlotBytes
+      TRAINER_CLASS_NAMES_MIN_VALID_SLOTS * minSlotBytes
   ) {
     return null;
   }
-  const limit = romBytes.byteLength - maxSlotBytes;
+  const limit = romBytes.byteLength - minSlotBytes;
   let best: { offset: number; slotBytes: number; count: number } | null = null;
 
   for (let p = CARTRIDGE_HEADER_END; p <= limit; p += 4) {

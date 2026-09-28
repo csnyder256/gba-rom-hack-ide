@@ -356,3 +356,16 @@ describe('readTrainerClassNamesAt - rejected layouts stay rejected', () => {
     expect(validateTrainerClassNames(readTrainerClassNamesAt(buf, 0x200, 60, 12))).toBe(false);
   });
 });
+
+// At the end of a minimal ROM, the 13-byte candidate must not hide a valid
+// packed table that has exactly the required number of 12-byte slots.
+it('finds a packed table when the ROM ends at the minimum valid run', () => {
+  const offset = 0xc0;
+  const rom = new Uint8Array(offset + TRAINER_CLASS_NAMES_MIN_VALID_SLOTS * 12).fill(0x7f);
+  for (let i = 0; i < TRAINER_CLASS_NAMES_MIN_VALID_SLOTS; i++) {
+    const name = encodeString(`CLASS${i}`);
+    rom.set(name, offset + i * 12);
+    rom[offset + i * 12 + name.length] = STRING_TERMINATOR;
+  }
+  expect(findTrainerClassNamesTable(rom)).toEqual({ offset, slotBytes: 12 });
+});
