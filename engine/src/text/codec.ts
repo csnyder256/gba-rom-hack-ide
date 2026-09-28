@@ -187,8 +187,11 @@ export function decodeString(bytes: Uint8Array, offset: number, maxLen: number):
  * dialogue back into a ROM.
  *
  * Characters with no Gen-3 mapping throw - this is intentional for
- * typo'd needles (`@`, `#`, tab), but the encoder is the exact inverse
- * of `decodeString` for everything the decoder can emit: pass
+ * typo'd needles (`@`, `#`, tab).
+ *
+ * ## How far the inverse goes (and where it stops)
+ *
+ * For every byte the decoder can EMIT, the encoder is its inverse: pass
  * `decodeString(bytes, ...)` back in and the same bytes come out. That
  * includes the multi-character control-code placeholders the decoder
  * produces (`\p`, `\l`, `{CC}`, `{VAR}`, and the 0xFE newline), which
@@ -196,6 +199,25 @@ export function decodeString(bytes: Uint8Array, offset: number, maxLen: number):
  * Those are matched greedily as whole units before falling back to
  * single-character lookup, so a placeholder is never split into its
  * constituent characters (which would throw on `{` or `\`).
+ *
+ * The inverse does NOT hold for bytes the decoder cannot emit, and the
+ * reason is a real, lossy edge the caller has to live with:
+ *
+ *  - Every byte with no TABLE entry (e.g. 0x36..0xA0 and 0xFF-adjacent
+ *    gaps) decodes to the SAME placeholder `'?'`. Encoding `'?'` back
+ *    yields 0xAC (the real question-mark byte), never the original.
+ *    The mapping byte→char is many-to-one, so char→byte cannot recover
+ *    which byte it came from.
+ *  - TABLE has no entry for literal `'?'`-shaped ambiguity beyond
+ *    that one: `'?'` is a legitimate character (0xAC), so a decoded
+ *    `'?'` is indistinguishable from an unmapped byte.
+ *
+ * Callers that need byte-exact round-tripping must therefore treat
+ * `'?'` in decoded output as "unmapped or a real question mark" and
+ * refuse to rewrite a slot containing it, rather than assuming
+ * encode(decode(b)) === b for all b. The round-trip test in
+ * `codec.test.ts` asserts the inverse only over bytes the decoder can
+ * actually emit, and asserts the lossy `'?'` collapse separately.
  *
  * Returns a `Uint8Array` (consumers can wrap with `Buffer.from()` if
  * they need a Node Buffer).

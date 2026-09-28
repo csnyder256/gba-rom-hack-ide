@@ -27,12 +27,17 @@ import { proposePatch, ProposePatchError } from './propose-patch.js';
 export const PROPOSE_CREATE_TRAINER_CLASS_TOOL_NAME = 'propose_create_trainer_class';
 
 export const PROPOSE_CREATE_TRAINER_CLASS_DESCRIPTION =
-  'Set a trainer class name in gTrainerClasses (13-byte slot per\n' +
-  'class). Vanilla FRLG has ~106 classes (LEADER, CHAMPION, RIVAL,\n' +
-  'etc.); slots past that are typically zeroed and available.\n\n' +
+  'Set a trainer class name in gTrainerClasses (one fixed-size slot\n' +
+  'per class, terminated by 0xFF). Vanilla FRLG has ~106 classes\n' +
+  '(LEADER, CHAMPION, RIVAL, etc.); slots past that are typically\n' +
+  'zeroed and available.\n\n' +
+  'The slot stride is resolved from the ROM: 13 bytes on vanilla\n' +
+  'FRLG/Emerald tables (12 chars + terminator), 12 on tables that\n' +
+  'pack the name and its 0xFF into the same 12 bytes.\n\n' +
   'Inputs:\n' +
   '  - `classIndex`: u16 - slot in gTrainerClasses to overwrite.\n' +
-  '  - `className`: 1-12 chars (the 13th byte is a 0xFF terminator).';
+  '  - `className`: 1-12 chars; must fit the resolved slot minus its\n' +
+  '    0xFF terminator (12 bytes in a 13-byte slot, 11 in a 12-byte one).';
 
 const u16 = z.number().int().min(0).max(0xffff);
 
@@ -82,23 +87,31 @@ export async function proposeCreateTrainerClass(
   const rom = await findRomFile(ctx.projectRoot);
   if (!rom) return emptyResult(args.classIndex, `No .gba in ${ctx.projectRoot}`);
   const romBytes = new Uint8Array(rom.bytes);
-  const tableStart = trainersApi.findTrainerClassNamesTable(romBytes);
-  if (tableStart === null) {
+  const table = trainersApi.findTrainerClassNamesTable(romBytes);
+  if (table === null) {
     return emptyResult(args.classIndex, 'Could not locate gTrainerClasses table.');
   }
 
-  const slotOffset = tableStart + args.classIndex * trainersApi.TRAINER_CLASS_NAME_SLOT_BYTES;
-  if (slotOffset + trainersApi.TRAINER_CLASS_NAME_SLOT_BYTES > rom.bytes.length) {
+  // Walk at the stride the scanner validated. A vanilla table is 13
+  // bytes/slot; a hack that packs the name and its 0xFF into 12 uses 12.
+  // Indexing a 12-byte table at 13 would write into the middle of a
+  // neighbouring class and leave the requested class unchanged.
+  const slotBytes = table.slotBytes;
+  const slotOffset = table.offset + args.classIndex * slotBytes;
+  if (slotOffset + slotBytes > rom.bytes.length) {
     return emptyResult(args.classIndex, `classIndex ${String(args.classIndex)} is past ROM end.`);
   }
-  const oldBytes = new Uint8Array(rom.bytes.subarray(slotOffset, slotOffset + trainersApi.TRAINER_CLASS_NAME_SLOT_BYTES));
+  const oldBytes = new Uint8Array(rom.bytes.subarray(slotOffset, slotOffset + slotBytes));
 
-  // Encode + pad to 13 bytes with 0xFF terminator.
+  // Encode + pad the rest of the slot with 0xFF terminators.
   const encoded = textApi.encodeString(args.className.toUpperCase());
-  if (encoded.length > trainersApi.TRAINER_CLASS_NAME_SLOT_BYTES) {
-    return emptyResult(args.classIndex, `encoded class name length ${String(encoded.length)} > 13 byte slot`);
+  if (encoded.length > slotBytes - 1) {
+    return emptyResult(
+      args.classIndex,
+      `encoded class name length ${String(encoded.length)} > ${String(slotBytes - 1)} usable bytes in a ${String(slotBytes)}-byte slot (one byte is the 0xFF terminator)`,
+    );
   }
-  const newBytes = new Uint8Array(trainersApi.TRAINER_CLASS_NAME_SLOT_BYTES);
+  const newBytes = new Uint8Array(slotBytes);
   newBytes.set(encoded);
   for (let i = encoded.length; i < newBytes.length; i++) newBytes[i] = 0xff;
 
@@ -123,7 +136,7 @@ export async function proposeCreateTrainerClass(
     proposal,
     classIndex: args.classIndex,
     slotOffset,
-    bytesWritten: trainersApi.TRAINER_CLASS_NAME_SLOT_BYTES,
-    message: `Trainer class ${String(args.classIndex)} = "${args.className.toUpperCase()}" @ 0x${slotOffset.toString(16)}.`,
+    bytesWritten: slotBytes,
+    message: `Trainer class ${String(args.classIndex)} = "${args.className.toUpperCase()}" @ 0x${slotOffset.toString(16)} (${String(slotBytes)}-byte slot).`,
   };
 }
