@@ -31,6 +31,7 @@ export {
   findTrainerClassNamesTable,
   readTrainerClassNamesAt,
   validateTrainerClassNames,
+  type TrainerClassNamesTable,
 } from './trainer-class-names.js';
 
 export {

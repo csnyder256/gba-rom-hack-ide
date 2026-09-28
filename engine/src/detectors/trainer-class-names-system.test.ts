@@ -105,6 +105,40 @@ describe('trainerClassNamesDetector', () => {
     expect(regions[0]?.start).toBe(0x400);
   });
 
+  it('reports the real class names for a 12-byte-stride table it accepts', () => {
+    // The detector is the user-visible surface: its sampleNames are what
+    // the workspace shows. Accepting a 12-byte table and then reading it
+    // at 13 bytes yields merged neighbours, so the promise "we detected
+    // your table" has to come with names that are actually the classes.
+    const bytes = new Uint8Array(8 * 1024);
+    bytes[0xb2] = 0x96;
+    fillNonClassBytes(bytes, 0xc0);
+    // Space-padded to exactly 11 bytes so the 0xFF lands on each slot's
+    // last byte. Short names leave filler that decodes as `????` after
+    // the terminator; letter-padding would manufacture a false anchor
+    // from the repeated tail.
+    const names = Array.from({ length: 40 }, (_, i) =>
+      `CLASS${String(i).padStart(2, '0')}`.slice(0, 11).padEnd(11, ' '),
+    );
+    for (let i = 0; i < names.length; i++) {
+      const name = encodeString(names[i]!);
+      const start = 0x400 + i * 12;
+      bytes.set(name.subarray(0, 11), start);
+      bytes[start + 11] = STRING_TERMINATOR;
+    }
+    const rom = loadRomFromBytes({ bytes, sourcePath: 'test://classes-12', synthetic: true });
+    const cov = new CoverageMap(bytes.length);
+    const r = trainerClassNamesDetector.detect(rom, cov);
+    expect(r.status).toBe('detected');
+    if (r.status === 'detected') {
+      expect(r.data.tableOffset).toBe(0x400);
+      expect(r.data.sampleNames[0]).toBe('CLASS00    ');
+      expect(r.data.sampleNames[1]).toBe('CLASS01    ');
+      expect(r.data.sampleNames[2]).toBe('CLASS02    ');
+      expect(r.data.validClassCount).toBeGreaterThanOrEqual(30);
+    }
+  });
+
   it('result.data is frozen', () => {
     const bytes = new Uint8Array(8 * 1024);
     bytes[0xb2] = 0x96;
