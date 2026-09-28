@@ -70,24 +70,63 @@ export function readTrainerClassNamesAt(
  * Validate that a single 13-byte slot decodes as a trainer-class-shaped
  * name: ≥3 uppercase A-Z chars, no garbage, properly terminated within
  * the slot.
+ *
+ * The terminator requirement is load-bearing, not cosmetic. Every real
+ * Gen-3 trainer-class slot ends in 0xFF, so a slot that runs off the end
+ * of its 13 bytes without one is a misaligned read of some *other*
+ * structure. Admitting unterminated slots at a fixed 13-byte stride
+ * makes the run-walk blind to slot-size drift: two adjacent 12-byte
+ * name entries read at a 13-byte stride both look "valid" (each read
+ * ends mid-way through the next entry, still inside the A-Z range), so
+ * the walk coasts straight through a stride change and can re-anchor on
+ * unrelated uppercase data further down the ROM.
+ *
+ * `readSlot` is handed in so `findTrainerClassNamesTable` can walk
+ * candidate strides while `readTrainerClassNamesAt` keeps the fixed one.
  */
-function isValidTrainerClassSlot(
+function readSlot(
   romBytes: Uint8Array,
   slotOffset: number,
-): boolean {
-  if (slotOffset + TRAINER_CLASS_NAME_SLOT_BYTES > romBytes.byteLength) {
-    return false;
-  }
-  const decoded = decodeString(romBytes, slotOffset, TRAINER_CLASS_NAME_SLOT_BYTES);
+  slotBytes: number,
+): { decoded: string; terminated: boolean } | null {
+  if (slotOffset < 0 || slotOffset + slotBytes > romBytes.byteLength) return null;
+  const decoded = decodeString(romBytes, slotOffset, slotBytes);
+  // decodeString stops at the first 0xFF, so a terminator inside the slot
+  // means it consumed fewer than slotBytes bytes.
+  const terminated = decoded.length < slotBytes;
+  return { decoded, terminated };
+}
+
+function isShapedClassSlot(decoded: string): boolean {
   if (decoded.length === 0) return false;
   if (decoded.includes('??')) return false;
   if (decoded.split('').every((c) => c === '?')) return false;
   // Accept single-word ALL-CAPS (HIKER) OR multi-word (BUG CATCHER)
-  // OR with brace-substitutions like {PKMN} TRAINER (decoded as "?"
-  // for the substitution token - so check for ≥3 contiguous A-Z chars
+  // OR with brace-substitutions like {PKMN} TRAINER (decoded as "?" for
+  // the substitution token - so check for ≥3 contiguous A-Z chars
   // ignoring potential leading "?" substitution markers).
   return /[A-Z]{3,}/.test(decoded);
 }
+
+function isValidTrainerClassSlot(
+  romBytes: Uint8Array,
+  slotOffset: number,
+  slotBytes: number = TRAINER_CLASS_NAME_SLOT_BYTES,
+): boolean {
+  const slot = readSlot(romBytes, slotOffset, slotBytes);
+  if (slot === null || !slot.terminated) return false;
+  return isShapedClassSlot(slot.decoded);
+}
+
+/** Slot sizes a real Gen-3 gTrainerClassNames table is known to use.
+ *  Vanilla FRLG/Emerald and every hack checked so far use 13 (12 chars +
+ *  0xFF); 12 shows up in tables that were rewritten without the
+ *  terminator slot. Ordered by how likely they are to be the true
+ *  stride, so ties in run length resolve to the conventional layout. */
+export const TRAINER_CLASS_NAME_SLOT_CANDIDATES: ReadonlyArray<number> = Object.freeze([
+  TRAINER_CLASS_NAME_SLOT_BYTES,
+  12,
+]);
 
 /**
  * Validate that `names` look like a real Gen-3 trainer-class-names
@@ -119,50 +158,69 @@ export function validateTrainerClassNames(names: ReadonlyArray<string>): boolean
  * Returns the offset of the first valid slot if a run of ≥
  * `TRAINER_CLASS_NAMES_MIN_VALID_SLOTS` slots is found; null otherwise.
  *
+ * Two details keep the reported run from overshooting into unrelated
+ * data further down the ROM:
+ *
+ *  - Every counted slot must terminate (0xFF) inside its own slot, so a
+ *    stride change ends the run instead of being read straight through.
+ *  - The walk stops at the first unterminated slot rather than skipping
+ *    it and resuming, which is what previously let the cursor coast past
+ *    a 12-byte region onto an unrelated uppercase string run.
+ *
+ * Ties are resolved by candidate order (13 first), so a genuine 13-byte
+ * table always wins over the 12-byte reading of itself.
+ *
  * PD 5: structural - works on any Gen-3 cart.
  */
 export function findTrainerClassNamesTable(romBytes: Uint8Array): number | null {
+  const maxSlotBytes = Math.max(...TRAINER_CLASS_NAME_SLOT_CANDIDATES);
   if (
     romBytes.byteLength <
     CARTRIDGE_HEADER_END +
-      TRAINER_CLASS_NAMES_MIN_VALID_SLOTS * TRAINER_CLASS_NAME_SLOT_BYTES
+      TRAINER_CLASS_NAMES_MIN_VALID_SLOTS * maxSlotBytes
   ) {
     return null;
   }
-  const limit = romBytes.byteLength - TRAINER_CLASS_NAME_SLOT_BYTES;
+  const limit = romBytes.byteLength - maxSlotBytes;
   let best: { offset: number; count: number } | null = null;
 
   for (let p = CARTRIDGE_HEADER_END; p <= limit; p += 4) {
-    // Anchor confirmation: require 10 consecutive valid slots from p.
-    let confirmed = true;
-    for (let i = 0; i < TRAINER_CLASS_NAMES_ANCHOR_CONFIRMATION; i++) {
-      const slotOff = p + i * TRAINER_CLASS_NAME_SLOT_BYTES;
-      if (!isValidTrainerClassSlot(romBytes, slotOff)) {
-        confirmed = false;
-        break;
+    for (const slotBytes of TRAINER_CLASS_NAME_SLOT_CANDIDATES) {
+      // Anchor confirmation: require 10 consecutive valid slots from p
+      // at THIS stride.
+      let confirmed = true;
+      for (let i = 0; i < TRAINER_CLASS_NAMES_ANCHOR_CONFIRMATION; i++) {
+        const slotOff = p + i * slotBytes;
+        if (!isValidTrainerClassSlot(romBytes, slotOff, slotBytes)) {
+          confirmed = false;
+          break;
+        }
       }
-    }
-    if (!confirmed) continue;
+      if (!confirmed) continue;
 
-    // Walk forward to find run length.
-    let count = TRAINER_CLASS_NAMES_ANCHOR_CONFIRMATION;
-    let cursor = p + TRAINER_CLASS_NAMES_ANCHOR_CONFIRMATION * TRAINER_CLASS_NAME_SLOT_BYTES;
-    while (
-      cursor + TRAINER_CLASS_NAME_SLOT_BYTES <= romBytes.byteLength &&
-      count < TRAINER_CLASS_NAMES_READ_CAP
-    ) {
-      if (!isValidTrainerClassSlot(romBytes, cursor)) break;
-      count++;
-      cursor += TRAINER_CLASS_NAME_SLOT_BYTES;
-    }
+      // Walk forward at the same stride to find the run length.
+      let count = TRAINER_CLASS_NAMES_ANCHOR_CONFIRMATION;
+      let cursor = p + TRAINER_CLASS_NAMES_ANCHOR_CONFIRMATION * slotBytes;
+      while (
+        cursor + slotBytes <= romBytes.byteLength &&
+        count < TRAINER_CLASS_NAMES_READ_CAP
+      ) {
+        if (!isValidTrainerClassSlot(romBytes, cursor, slotBytes)) break;
+        count++;
+        cursor += slotBytes;
+      }
 
-    if (count >= TRAINER_CLASS_NAMES_MIN_VALID_SLOTS) {
-      if (best === null || count > best.count) {
+      // Longer run wins; on a tie the earlier candidate (13-byte) keeps
+      // the table, matching the canonical Gen-3 layout.
+      if (
+        count >= TRAINER_CLASS_NAMES_MIN_VALID_SLOTS &&
+        (best === null ||
+          count > best.count ||
+          (count === best.count && p < best.offset))
+      ) {
         best = { offset: p, count };
       }
     }
-    // Skip past this candidate run to avoid re-anchoring inside it.
-    p = cursor;
   }
 
   return best?.offset ?? null;

@@ -150,3 +150,66 @@ describe('findTrainerClassNamesTable', () => {
     expect(findTrainerClassNamesTable(buf)).toBeNull();
   });
 });
+
+/**
+ * Slot-size fidelity. A slot is only a real trainer-class entry if the
+ * name TERMINATES inside it; a read that spills into the next slot is a
+ * misaligned read of some other structure.
+ */
+describe('findTrainerClassNamesTable - slot-size fidelity', () => {
+  /** Pack `count` 12-char names at a 12-byte stride with NO 0xFF
+   *  terminator anywhere - the shape of a table written without the
+   *  conventional trailing terminator. */
+  function plantUnterminated12ByteRun(buf: Uint8Array, offset: number, count: number): void {
+    fillNonClassBytes(buf, 0);
+    for (let i = 0; i < count; i++) {
+      const name = `BADCLASS${String(i % 10).padStart(2, '0')}`.slice(0, 12);
+      for (let j = 0; j < 12; j++) {
+        buf[offset + i * 12 + j] = 0xbb + (name.charCodeAt(j) - 65);
+      }
+    }
+  }
+
+  it('rejects a run of slots that never terminate inside the slot', () => {
+    // Reading this at a 13-byte stride yields 12 real letters followed by
+    // the next entry's first letter - still A-Z, so the old validator
+    // called all 60 "valid" and anchored on a table that does not exist.
+    const buf = new Uint8Array(4 * 1024);
+    plantUnterminated12ByteRun(buf, 0x200, 60);
+    expect(findTrainerClassNamesTable(buf)).toBeNull();
+  });
+
+  it('finds a genuine 12-byte-stride table instead of rejecting the layout', () => {
+    const buf = new Uint8Array(4 * 1024);
+    fillNonClassBytes(buf, 0);
+    for (let i = 0; i < 60; i++) {
+      // 12-byte stride, name + terminator packed into the SAME 12 bytes.
+      const slot = new Uint8Array(12);
+      const encoded = encodeString(`LASS${String(i % 10)}`);
+      slot.set(encoded.subarray(0, 11), 0);
+      slot[Math.min(encoded.length, 11)] = STRING_TERMINATOR;
+      buf.set(slot, 0x200 + i * 12);
+    }
+    expect(findTrainerClassNamesTable(buf)).toBe(0x200);
+  });
+
+  it('stops the run at a stride change instead of reading through it', () => {
+    // 40 real 13-byte slots, then a 12-byte region whose reads at a
+    // 13-byte stride also look valid, then 40 more real slots. The
+    // reported table must be the first 13-byte run, and it must not
+    // matter that the second run is also long enough to anchor.
+    const buf = new Uint8Array(4 * 1024);
+    fillNonClassBytes(buf, 0);
+    plantClassNamesTable(buf, 0x200, 40);
+    const gapStart = 0x200 + 40 * TRAINER_CLASS_NAME_SLOT_BYTES;
+    for (let i = 0; i < 12; i++) {
+      const slot = new Uint8Array(12);
+      const encoded = encodeString(`BAD${String(i).padStart(2, '0')}ZZ`);
+      slot.set(encoded.subarray(0, 11), 0);
+      slot[11] = STRING_TERMINATOR;
+      buf.set(slot, gapStart + i * 12);
+    }
+    plantClassNamesTable(buf, gapStart + 12 * 12, 40);
+    expect(findTrainerClassNamesTable(buf)).toBe(0x200);
+  });
+});
