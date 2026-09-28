@@ -24,12 +24,14 @@ export {
 
 export {
   TRAINER_CLASS_NAME_SLOT_BYTES,
+  TRAINER_CLASS_NAME_SLOT_CANDIDATES,
   TRAINER_CLASS_NAMES_ANCHOR_CONFIRMATION,
   TRAINER_CLASS_NAMES_MIN_VALID_SLOTS,
   TRAINER_CLASS_NAMES_READ_CAP,
   findTrainerClassNamesTable,
   readTrainerClassNamesAt,
   validateTrainerClassNames,
+  type TrainerClassNamesTable,
 } from './trainer-class-names.js';
 
 export {

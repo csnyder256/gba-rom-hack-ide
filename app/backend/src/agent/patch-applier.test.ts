@@ -2,7 +2,7 @@ import { promises as fsp } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { text } from '@rom-introspection/engine';
+import { text, trainers } from '@rom-introspection/engine';
 import { applyEdits, PatchApplyError } from './patch-applier.js';
 
 const STRING_TERMINATOR = 0xff;
@@ -271,6 +271,115 @@ describe('applyEdits - binary_replace_text', () => {
     for (let i = 2; i < 8; i++) {
       expect(buf[0x500 + i]).toBe(STRING_TERMINATOR);
     }
+  });
+
+  it('writes a replacement containing control codes the decoder itself emits', async () => {
+    // Regression: `binary_replace_text` end-to-end. The editor decodes a
+    // ROM string, the user edits it (or types the documented \p / {VAR}
+    // shorthand straight in), and the applier re-encodes it. Before the
+    // codec fix, `after` containing \p or {VAR} threw "Cannot encode
+    // character '\'" / "'{'" and the write was impossible - the decoder
+    // emitted a placeholder the encoder could not read back.
+    await seedRom([{ offset: 0x900, text: 'HELLO THERE' }]); // 11 + terminator = 12 bytes
+    const result = await applyEdits(root, [
+      {
+        kind: 'binary_replace_text',
+        textOffset: 0x900,
+        before: 'HELLO THERE',
+        after: 'HI\\pBYE', // 4 text + \p (2 glyphs -> 1 byte) + 3 text = 8 bytes
+      },
+    ]);
+    expect(result.appliedCount).toBe(1);
+    const buf = await fsp.readFile(path.join(root, ROM_NAME));
+    // "HI" then the single \p control byte (0xFA) then "BYE".
+    expect(buf[0x900]).toBe(0xc2); // H
+    expect(buf[0x900 + 2]).toBe(0xfa); // \p
+    expect(text.decodeString(buf, 0x900, 16)).toBe('HI\\pBYE');
+    // And the write is reversible, control code included.
+    await applyEdits(root, [...result.reverseEdits]);
+    expect(text.decodeString(await fsp.readFile(path.join(root, ROM_NAME)), 0x900, 16)).toBe(
+      'HELLO THERE',
+    );
+  });
+
+  it('rewrites the class the caller asked for in a genuine 12-byte-stride table', async () => {
+    // End-to-end consumer path: findTrainerClassNamesTable accepts the
+    // 12-byte layout, then the actual read/write must land on the same
+    // slot the user asked for. Detecting 12 and then indexing at 13
+    // writes a class name into the middle of a neighbour's slot - the
+    // user-visible class is unchanged and an unrelated one is corrupted.
+    const ROM_BYTES = 8 * 1024;
+    const TABLE_OFFSET = 0x400;
+    const buf = Buffer.alloc(ROM_BYTES, 0x00);
+    // Fill with bytes outside the codec's uppercase range so nothing else
+    // can look like a class slot.
+    for (let i = 0; i < buf.length; i++) buf[i] = 100 + ((i * 13) % 50);
+    // Each name is space-padded to exactly 11 bytes so the 0xFF lands on
+    // the last byte of its 12-byte slot. A short name leaves filler after
+    // the terminator, and letter-padding would manufacture a false anchor
+    // from the repeated tail.
+    const names = Array.from({ length: 40 }, (_, i) =>
+      `CLASS${String(i).padStart(2, '0')}`.slice(0, 11).padEnd(11, ' '),
+    );
+    for (let i = 0; i < names.length; i++) {
+      const encodedName = text.encodeString(names[i]!);
+      const start = TABLE_OFFSET + i * 12;
+      buf.set(encodedName.subarray(0, 11), start);
+      buf[start + 11] = STRING_TERMINATOR;
+    }
+    await fsp.writeFile(path.join(root, ROM_NAME), buf);
+
+    const romBytes = new Uint8Array(buf);
+    const table = trainers.findTrainerClassNamesTable(romBytes);
+    expect(table).not.toBeNull();
+    expect(table!.offset).toBe(TABLE_OFFSET);
+    expect(table!.slotBytes).toBe(12);
+
+    // The table's own reader must decode the real names at the detected stride.
+    // The names decode with their slot padding intact, so compare on the
+    // trimmed form; the padding is real on-disk data, not decoration.
+    expect(
+      trainers
+        .readTrainerClassNamesAt(romBytes, table!.offset, 3, table!.slotBytes)
+        .map((n) => n.trimEnd()),
+    ).toEqual(['CLASS00', 'CLASS01', 'CLASS02']);
+    // ...and a fixed 13-byte read of the same table shifts every slot
+    // after the first, so it cannot reproduce the real classes.
+    const wrongStride = trainers.readTrainerClassNamesAt(romBytes, table!.offset, 3);
+    expect(wrongStride.map((n) => n.trimEnd())).not.toEqual(['CLASS00', 'CLASS01', 'CLASS02']);
+    expect(wrongStride[1]).toContain('LASS01');
+
+    // Now the write path the tool uses.
+    const classIndex = 7;
+    const slotOffset = table!.offset + classIndex * table!.slotBytes;
+    const beforeDecoded = text.decodeString(buf, slotOffset, 12);
+    expect(beforeDecoded.trimEnd()).toBe(`CLASS${String(classIndex).padStart(2, '0')}`);
+    const encoded = text.encodeString('NEWCLASS');
+    const newBytes = new Uint8Array(table!.slotBytes).fill(STRING_TERMINATOR);
+    newBytes.set(encoded);
+    const result = await applyEdits(root, [
+      {
+        kind: 'binary_write_bytes',
+        offset: slotOffset,
+        beforeBytes: Buffer.from(buf.subarray(slotOffset, slotOffset + 12)).toString('hex'),
+        afterBytes: Buffer.from(newBytes).toString('hex'),
+      },
+    ]);
+    expect(result.appliedCount).toBe(1);
+
+    const after = await fsp.readFile(path.join(root, ROM_NAME));
+    // The class the caller targeted changed...
+    expect(text.decodeString(after, slotOffset, 12)).toBe('NEWCLASS');
+    // ...and every other class still decodes exactly as planted.
+    for (let i = 0; i < names.length; i++) {
+      if (i === classIndex) continue;
+      expect(text.decodeString(after, TABLE_OFFSET + i * 12, 12).trimEnd()).toBe(
+        `CLASS${String(i).padStart(2, '0')}`,
+      );
+    }
+    // Nothing straddles: the bytes read at 13-byte stride must not have
+    // been the ones we wrote.
+    expect(TABLE_OFFSET + classIndex * 13).not.toBe(slotOffset);
   });
 
   it('rejects after-text that encodes longer than the original slot', async () => {
