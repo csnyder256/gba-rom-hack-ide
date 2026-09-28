@@ -181,35 +181,87 @@ export function decodeString(bytes: Uint8Array, offset: number, maxLen: number):
 }
 
 /**
- * Encode an ASCII string back into Gen-3 text bytes. Used by signature-
- * scan paths to build a needle (e.g. "BULBASAUR") to search for in
- * unknown ROM layouts. Characters with no Gen-3 mapping throw - this
- * is intentional: signature-scan needles should always be all-uppercase
- * + standard ASCII + digits + space.
+ * Encode a string back into Gen-3 text bytes. Used by signature-scan
+ * paths to build a needle (e.g. "BULBASAUR") to search for in unknown
+ * ROM layouts, and by every write path that round-trips decoded
+ * dialogue back into a ROM.
+ *
+ * Characters with no Gen-3 mapping throw - this is intentional for
+ * typo'd needles (`@`, `#`, tab), but the encoder is the exact inverse
+ * of `decodeString` for everything the decoder can emit: pass
+ * `decodeString(bytes, ...)` back in and the same bytes come out. That
+ * includes the multi-character control-code placeholders the decoder
+ * produces (`\p`, `\l`, `{CC}`, `{VAR}`, and the 0xFE newline), which
+ * the app's own help text tells users to type directly into a text box.
+ * Those are matched greedily as whole units before falling back to
+ * single-character lookup, so a placeholder is never split into its
+ * constituent characters (which would throw on `{` or `\`).
  *
  * Returns a `Uint8Array` (consumers can wrap with `Buffer.from()` if
  * they need a Node Buffer).
  */
 export function encodeString(s: string): Uint8Array {
   const out: number[] = [];
-  for (const ch of s) {
-    const b = REVERSE_TABLE[ch];
+  for (let i = 0; i < s.length; ) {
+    // Longest-match-first over the multi-character placeholders. Every
+    // entry in PLACEHOLDER_BYTES is longer than one character, so
+    // checking these before the single-character table cannot shadow a
+    // legitimate one-char mapping.
+    let matched = false;
+    for (const placeholder of PLACEHOLDERS_LONGEST_FIRST) {
+      if (s.startsWith(placeholder, i)) {
+        out.push(PLACEHOLDER_BYTES[placeholder]!);
+        i += placeholder.length;
+        matched = true;
+        break;
+      }
+    }
+    if (matched) continue;
+    // `Array.from`-style iteration would split astral characters into
+    // surrogate pairs; the Gen-3 charmap is entirely BMP, so walk code
+    // points and let anything outside the table throw below.
+    const ch = s.codePointAt(i)!;
+    const chStr = String.fromCodePoint(ch);
+    const b = REVERSE_TABLE[chStr];
     if (b !== undefined) {
       out.push(b);
+      i += chStr.length;
       continue;
     }
-    const code = ch.charCodeAt(0);
     throw new Error(
-      `Cannot encode character '${ch}' (U+${code.toString(16).padStart(4, '0')}) to Gen-3 text`,
+      `Cannot encode character '${chStr}' (U+${ch.toString(16).padStart(4, '0')}) to Gen-3 text`,
     );
   }
   return new Uint8Array(out);
 }
 
+/**
+ * Multi-character control-code placeholders the decoder emits, mapped to
+ * the byte they stand for. Kept in one place so `encodeString` and the
+ * round-trip test stay in sync with `TABLE`.
+ *
+ * `\n` (a real newline, 0xFE) is single-character and therefore lives in
+ * `REVERSE_TABLE`; only the placeholders that span more than one code
+ * unit belong here.
+ */
+const PLACEHOLDER_BYTES: Readonly<Record<string, number>> = Object.freeze({
+  '{CC}': 0xfc,
+  '{VAR}': 0xfd,
+  '\\p': 0xfa,
+  '\\l': 0xfb,
+});
+
+/** Placeholder keys ordered longest-first so a shorter placeholder can
+ *  never win against a longer one that shares its prefix. */
+const PLACEHOLDERS_LONGEST_FIRST: ReadonlyArray<string> = Object.freeze(
+  Object.keys(PLACEHOLDER_BYTES).sort((a, b) => b.length - a.length),
+);
+
 /** Reverse of TABLE for `encodeString`. Built lazily once at module
- *  init. When TABLE maps multiple bytes to the same string (e.g. control
- *  codes), the FIRST byte encountered wins - irrelevant for player-text
- *  encoding since control-code placeholders aren't valid encoder input. */
+ *  init. When TABLE maps multiple bytes to the same string the FIRST
+ *  byte encountered wins. Multi-character placeholders are handled by
+ *  `PLACEHOLDER_BYTES` before this table is consulted; `\n` (0xFE) is
+ *  single-character so it resolves here like any other entry. */
 const REVERSE_TABLE: Readonly<Record<string, number>> = (() => {
   const r: Record<string, number> = {};
   for (const [byteStr, ch] of Object.entries(TABLE)) {
