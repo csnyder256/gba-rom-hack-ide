@@ -1,0 +1,12 @@
+const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),{execFileSync}=require('node:child_process');
+const platform=process.argv[2];if(!['linux','win','mac'].includes(platform))throw new Error('Choose linux, win or mac');
+const root=path.resolve(__dirname,'..'),out=path.join(__dirname,'release-assets'),version=fs.readFileSync(path.join(root,'VERSION'),'utf8').trim();
+fs.mkdirSync(out,{recursive:true});
+const suffixes=platform==='linux'?['.AppImage']:platform==='win'?['.exe']:['.dmg','.zip'];
+const allowed=fs.readdirSync(path.join(__dirname,'dist')).filter(name=>suffixes.some(s=>name.endsWith(s))||name.endsWith('.blockmap')||name===(platform==='linux'?'latest-linux.yml':platform==='win'?'latest.yml':'latest-mac.yml'));
+if(!allowed.some(name=>suffixes.some(s=>name.endsWith(s))))throw new Error('No production desktop artifact');
+for(const file of allowed)fs.copyFileSync(path.join(__dirname,'dist',file),path.join(out,file));
+const sha=b=>crypto.createHash('sha256').update(b).digest('hex');
+const manifest={schema_version:1,project:'gba-rom-hack-ide',version,source_sha:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),platform,electron:require('./node_modules/electron/package.json').version,builder:require('./node_modules/electron-builder/package.json').version,updater:require('./node_modules/electron-updater/package.json').version,signing:platform==='linux'?'Signed build provenance is added by the release job; no platform OS signature.':platform==='win'?'Authenticode verified by the production release job.':'Developer ID signing and notarization verified by the production release job.',files:Object.fromEntries(allowed.map(name=>[name,{sha256:sha(fs.readFileSync(path.join(out,name))),size:fs.statSync(path.join(out,name)).size}]))};
+fs.writeFileSync(path.join(out,'desktop-provenance-'+platform+'.json'),JSON.stringify(manifest,null,2)+'\n');
+console.log('Prepared desktop assets',platform,version,manifest.source_sha);

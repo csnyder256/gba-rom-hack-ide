@@ -106,6 +106,7 @@ import type {
 
 export interface ProjectsRouteOptions {
   readonly sessionStore: ProjectSessionStore;
+  readonly nativePicker?: typeof pickPath;
 }
 
 function errorResponse(
@@ -251,7 +252,7 @@ export async function registerProjectsRoute(
       // Picker is best-effort. Errors surface via the typed PickResult fields
       // so the frontend can show a friendly "fall back to typed input" hint
       // without treating the dialog cancel as an error.
-      return await pickPath(req.body.kind);
+      return await (options.nativePicker ?? pickPath)(req.body.kind);
     },
   );
 

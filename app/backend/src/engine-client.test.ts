@@ -87,5 +87,5 @@ describe('runEngineOnRom - PD 13 substrate (editor backend ↔ engine wire)', ()
     // universality before completeness).
     expect(result.workspaceModel.identity.sha1).toBe(rom.sha1);
     expect(result.workspaceModel.coverage.romSize).toBe(1024 * 1024);
-  }, 30_000);
+  }, 120_000); // Full ingest also runs for unknown families (measured ~41 s).
 });

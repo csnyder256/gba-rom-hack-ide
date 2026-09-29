@@ -5,7 +5,8 @@
     "app/backend/package.json",
     "app/frontend/package.json",
     "app/shared/package.json",
-    "engine/package.json"
+    "engine/package.json",
+    "desktop/package.json"
   ],
   "version_patterns": {
     "app/backend/src/routes/health.ts": "SERVICE_VERSION = '([^']+)'"

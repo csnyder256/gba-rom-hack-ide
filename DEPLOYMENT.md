@@ -2,7 +2,7 @@
 
 ## Prebuilt local application
 
-Download the `v0.2.0-prebuilt` ZIP or tarball from [Releases](https://github.com/csnyder256/gba-rom-hack-ide/releases). Verify SHA-256 against `checksums.txt`. Extract it, install **Node.js 22**, then run from the extracted folder:
+Download the `v0.3.0-prebuilt` ZIP or tarball from [Releases](https://github.com/csnyder256/gba-rom-hack-ide/releases). Verify SHA-256 against `checksums.txt`. Extract it, install **Node.js 22**, then run from the extracted folder:
 
 ```sh
 npm ci --prefix engine
@@ -21,3 +21,7 @@ Clone the repository and follow README's source-build instructions, or use the e
 ## Upgrade
 
 Stop both services before backing up projects, ROM copies, save files and private provider configuration. Extract a new release into a separate directory and install its locked dependencies again. Retain the old folder; open existing project folders from the new app. Keep the data backup and old app together for rollback. Do not store personal ROMs inside a release archive.
+
+## Native desktop distribution
+
+The AppImage bundles the editor runtime and offers stable update checks, verified downloads and a save/restart confirmation. [Desktop installation](DESKTOP.md) explains integrity verification, project persistence, platform signing gates and source builds. Windows and macOS production installers require the owner's signing identities; temporary unsigned CI directories are verification artifacts.

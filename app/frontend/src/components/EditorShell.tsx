@@ -4,6 +4,7 @@ import { StatusBar } from './StatusBar';
 import { HelpOverlay } from './HelpOverlay';
 import { UndoRedoButtons } from './UndoRedoButtons';
 import { useCommandPaletteStore } from './CommandPalette';
+import { DesktopUpdates } from './DesktopUpdates';
 import { ModernizeButton } from './ModernizeButton';
 import type { BackendStatus } from '../api';
 import { useUiPreferencesStore, useViewStore, type ViewKey } from '../state';
@@ -67,6 +68,7 @@ export function EditorShell({ backendStatus }: EditorShellProps) {
       <header className="editor-shell__titlebar">
         <span className="editor-shell__title">Pokémon GBA Decomp/Patch World Editor</span>
         <div className="editor-shell__titlebar-actions">
+          <DesktopUpdates />
           <button
             type="button"
             className="editor-shell__open-rom-btn"

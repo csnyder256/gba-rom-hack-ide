@@ -1,0 +1,45 @@
+appId: io.github.csnyder256.gba-rom-hack-ide
+productName: GBA ROM Hack IDE
+copyright: Copyright Cade
+asar: true
+directories:
+  output: dist
+files:
+  - main.cjs
+  - preload.cjs
+  - update-controller.cjs
+  - runtime-worker.cjs
+  - icon.png
+  - package.json
+extraResources:
+  - from: stage/runtime
+    to: runtime
+publish:
+  provider: github
+  owner: csnyder256
+  repo: gba-rom-hack-ide
+  releaseType: release
+artifactName: GBA-ROM-Hack-IDE-${version}-${os}-${arch}.${ext}
+linux:
+  syncDesktopName: true
+  executableName: gba-rom-hack-ide
+  target: [AppImage]
+  category: Development
+  icon: icon.png
+win:
+  target: [nsis]
+  forceCodeSigning: true
+  verifyUpdateCodeSignature: true
+  icon: icon.png
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+mac:
+  target: [dmg, zip]
+  forceCodeSigning: true
+  hardenedRuntime: true
+  notarize: true
+  category: public.app-category.developer-tools
+  icon: icon.png

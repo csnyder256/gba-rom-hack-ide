@@ -1,0 +1,105 @@
+name: Desktop distribution
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      DESKTOP_QA_DIR: ${{ github.workspace }}/desktop/qa
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Build engine
+        working-directory: engine
+        run: npm ci && npm run build
+      - name: Build app
+        working-directory: app
+        run: npm ci && npm run build
+      - name: Verify native build toolchain invocation
+        if: runner.os != 'Windows'
+        working-directory: app/backend
+        run: npx vitest run src/build/decomp-build-native.test.ts
+      - name: Install desktop tooling
+        working-directory: desktop
+        run: npm ci
+      - name: Stage self-contained runtime
+        working-directory: desktop
+        run: npm run stage
+      - name: Verify updater integrity and signing preflight
+        working-directory: desktop
+        run: npm test
+      - name: Exercise the real source desktop
+        working-directory: desktop
+        run: npm run verify
+      - name: Build unsigned verification directory
+        shell: bash
+        working-directory: desktop
+        run: npx electron-builder --dir --publish never -c.win.forceCodeSigning=false -c.mac.forceCodeSigning=false -c.mac.notarize=false
+      - name: Exercise the packaged desktop
+        working-directory: desktop
+        run: node verify-packaged.cjs
+      - name: Retain native desktop acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-acceptance-${{ runner.os }}-${{ github.sha }}
+          path: |
+            desktop/qa/*.png
+            desktop/qa/receipt.json
+          if-no-files-found: warn
+      - name: Build Linux AppImage
+        if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Linux'
+        working-directory: desktop
+        run: npm run dist:linux && node release-assets.cjs linux
+      - uses: actions/upload-artifact@v7
+        if: startsWith(github.ref, 'refs/tags/') && runner.os == 'Linux'
+        with:
+          name: desktop-linux
+          path: desktop/release-assets/*
+          if-no-files-found: error
+  publish-linux:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: desktop-linux
+          path: desktop/release-assets
+      - name: Verify version and source
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          test "$RELEASE_TAG" = "v$(cat VERSION)"
+          python -c "import json,subprocess,pathlib; p=json.loads(pathlib.Path('desktop/release-assets/desktop-provenance-linux.json').read_text()); assert p['source_sha']==subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(); assert p['version']==pathlib.Path('VERSION').read_text().strip()"
+      - uses: actions/attest@v3
+        id: attestation
+        with:
+          subject-path: desktop/release-assets/*
+      - name: Include attestation and complete checksums
+        env:
+          ATTESTATION_BUNDLE: ${{ steps.attestation.outputs.bundle-path }}
+        run: node desktop/finalize-assets.cjs linux "$ATTESTATION_BUNDLE"
+      - uses: softprops/action-gh-release@v3
+        with:
+          body_path: docs/releases/${{ github.ref_name }}.md
+          files: desktop/release-assets/*
+          fail_on_unmatched_files: true

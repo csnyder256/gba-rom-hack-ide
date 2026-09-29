@@ -1,3 +1,4 @@
+import { createDesktopApiFetch } from './desktop-api-fetch.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -1196,6 +1197,8 @@ async function main(): Promise<void> {
   // Optional - only required for propose_patch and other tools that
   // need to push state into the Fastify backend.
   const baseUrl = process.env.ROM_EDITOR_BASE_URL || undefined;
+  if (baseUrl && process.env.GBA_DESKTOP_SESSION_TOKEN) globalThis.fetch = createDesktopApiFetch(baseUrl, process.env.GBA_DESKTOP_SESSION_TOKEN, globalThis.fetch);
+
 
   const server = createAgentMcpServer({ projectRoot, baseUrl });
   const transport = new StdioServerTransport();

@@ -1,0 +1,139 @@
+name: Signed desktop releases
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        type: string
+        required: true
+        description: Existing stable release tag
+permissions:
+  contents: read
+jobs:
+  win:
+    if: vars.WINDOWS_SIGNING_ENABLED == 'true'
+    runs-on: windows-latest
+    environment: desktop-signing
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Verify stable tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        shell: bash
+        run: |
+          test "$RELEASE_TAG" = "v$(cat VERSION)"
+          python scripts/verify_release.py
+      - name: Build engine
+        working-directory: engine
+        run: npm ci && npm run build
+      - name: Build app
+        working-directory: app
+        run: npm ci && npm run build
+      - name: Stage and verify runtime
+        working-directory: desktop
+        run: npm ci && npm run stage && npm test && npm run verify
+      - name: Build signed production artifacts
+        working-directory: desktop
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+        run: npm run dist:win
+      - name: Verify installer Authenticode signatures
+        shell: pwsh
+        run: |
+          $installers = Get-ChildItem desktop/dist/*.exe
+          if (-not $installers) { throw 'Installer missing' }
+          foreach ($installer in $installers) {
+            $signature = Get-AuthenticodeSignature $installer.FullName
+            if ($signature.Status -ne 'Valid') { throw 'Installer signature invalid' }
+          }
+      - run: node desktop/release-assets.cjs win
+      - uses: actions/attest@v3
+        id: attestation
+        with:
+          subject-path: desktop/release-assets/*
+      - name: Include attestation and checksums
+        env:
+          ATTESTATION_BUNDLE: ${{ steps.attestation.outputs.bundle-path }}
+        shell: bash
+        run: node desktop/finalize-assets.cjs win "$ATTESTATION_BUNDLE"
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          body_path: docs/releases/${{ inputs.tag || github.ref_name }}.md
+          files: desktop/release-assets/*
+          fail_on_unmatched_files: true
+  mac:
+    if: vars.MACOS_SIGNING_ENABLED == 'true'
+    runs-on: macos-latest
+    environment: desktop-signing
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Verify stable tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        shell: bash
+        run: |
+          test "$RELEASE_TAG" = "v$(cat VERSION)"
+          python scripts/verify_release.py
+      - name: Build engine
+        working-directory: engine
+        run: npm ci && npm run build
+      - name: Build app
+        working-directory: app
+        run: npm ci && npm run build
+      - name: Stage and verify runtime
+        working-directory: desktop
+        run: npm ci && npm run stage && npm test && npm run verify
+      - name: Build signed production artifacts
+        working-directory: desktop
+        env:
+          CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npm run dist:mac
+      - name: Verify Developer ID signing and notarization
+        shell: bash
+        run: |
+          application=$(find desktop/dist -maxdepth 2 -name '*.app' -print -quit)
+          test -n "$application"
+          codesign --verify --deep --strict --verbose=2 "$application"
+          spctl --assess --type execute --verbose=4 "$application"
+          xcrun stapler validate "$application"
+      - run: node desktop/release-assets.cjs mac
+      - uses: actions/attest@v3
+        id: attestation
+        with:
+          subject-path: desktop/release-assets/*
+      - name: Include attestation and checksums
+        env:
+          ATTESTATION_BUNDLE: ${{ steps.attestation.outputs.bundle-path }}
+        shell: bash
+        run: node desktop/finalize-assets.cjs mac "$ATTESTATION_BUNDLE"
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          body_path: docs/releases/${{ inputs.tag || github.ref_name }}.md
+          files: desktop/release-assets/*
+          fail_on_unmatched_files: true

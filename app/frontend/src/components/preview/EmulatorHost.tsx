@@ -137,6 +137,8 @@ export function EmulatorHost(): JSX.Element {
    * on the next pointer/key gesture until it's actually running.
    */
   const ensureAudioRunning = (emu: EmulatorInstance): void => {
+    // The package exposes resumeAudio even when SDL2 is not exported.
+    try { emu.resumeAudio?.(); } catch { /* best-effort native resume */ }
     const ctx = emu.SDL2?.audioContext;
     if (!ctx || typeof ctx.resume !== 'function') return;
     if (ctx.state === 'running') return;
@@ -227,6 +229,9 @@ export function EmulatorHost(): JSX.Element {
           return;
         }
       }
+      // The core is created by loadGame. Register only after it exists, and
+      // refresh the callback when replacing a ROM on the same runtime.
+      emu.addCoreCallbacks?.({ videoFrameEndedCallback: () => { frameCountRef.current += 1; } });
       // When loadGame runs on a module that was already playing (Reload /
       // Build & Play reusing the runtime), mGBA can leave the core paused - 
       // the main loop stops and the canvas freezes on the last frame at 0 fps.
@@ -340,17 +345,6 @@ export function EmulatorHost(): JSX.Element {
       // Expose for console debugging: `__romEmu.SDL2.audioContext.state`,
       // `__romEmu.resumeAudio()`, etc.
       (window as unknown as { __romEmu?: EmulatorInstance }).__romEmu = emu;
-      // Drive the fps heartbeat: count every emulated frame. Registered before
-      // loadGame so we catch frames from the very first one.
-      frameCountRef.current = 0;
-      lastFrameSampleRef.current = 0;
-      if (typeof emu.addCoreCallbacks === 'function') {
-        emu.addCoreCallbacks({
-          videoFrameEndedCallback: () => {
-            frameCountRef.current += 1;
-          },
-        });
-      }
       // Initialize emscripten's virtual filesystem (uses IDBFS).
       const initFs = (emu as unknown as { FSInit?: () => Promise<void> | void }).FSInit;
       if (typeof initFs === 'function') {

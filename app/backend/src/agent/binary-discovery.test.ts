@@ -58,6 +58,7 @@ describe('findClaudeBinary', () => {
     const result = await findClaudeBinary({
       env: { HOME: tmpHome },
       platform: 'linux',
+      findOnPathImpl: async () => null,
     });
     expect(result).toBe(installed);
   });

@@ -1,0 +1,2 @@
+const test=require('node:test'),assert=require('node:assert/strict'),{execFileSync}=require('node:child_process'),path=require('node:path');
+test('real Electron update provider refuses downgrade and corrupt bytes, accepts matching SHA-512',()=>{const output=execFileSync(process.execPath,[path.join(__dirname,'../with-display.cjs'),'--provider-fixture'],{encoding:'utf8',timeout:60000});assert.match(output,/corrupt SHA-512 rejected/);console.log(output.trim());});

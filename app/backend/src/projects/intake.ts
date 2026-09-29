@@ -69,6 +69,7 @@ function classifyFile(filePath: string): IntakeKind | null {
 // %APPDATA% on Windows, else ~/.rom-editor (Linux/macOS fallback). Tests
 // override this by passing managedRootOverride into intakeFile.
 function defaultManagedRoot(): string {
+  if (process.env.ROM_EDITOR_MANAGED_ROOT) return path.resolve(process.env.ROM_EDITOR_MANAGED_ROOT);
   if (process.platform === 'win32' && process.env.APPDATA) {
     return path.join(process.env.APPDATA, 'rom-editor', 'projects');
   }

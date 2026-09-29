@@ -24,6 +24,10 @@ Everything runs on `127.0.0.1`. Nothing is uploaded anywhere.
 
 ---
 
+## Desktop workspace and updates
+
+[Install the desktop release](DESKTOP.md) for a self-contained editor/backend, native project pickers, persistent workspace data and stable update checks. Inspect the source provenance and verify the signed build attestation. Windows/macOS production pipelines require valid platform signing and notarization; their installers appear after those identities are configured. The standalone Node prebuilt route remains available in [Releases](https://github.com/csnyder256/gba-rom-hack-ide/releases).
+
 ## What is not in this repository
 
 This repo is **tooling only**. It contains no ROMs, no ROM images, no
