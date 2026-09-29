@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import type { HealthResponse } from '@rom-editor/shared';
 import { createServer } from './server.js';
@@ -21,7 +22,8 @@ describe('backend server', () => {
     const body = response.json() as HealthResponse;
     expect(body.status).toBe('ok');
     expect(body.service).toBe('rom-editor-backend');
-    expect(body.version).toBe('0.0.0');
+    const releaseVersion = readFileSync(new URL('../../../VERSION', import.meta.url), 'utf8').trim();
+    expect(body.version).toBe(releaseVersion);
     expect(body.uptimeSeconds).toBeGreaterThanOrEqual(0);
   });
 

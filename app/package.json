@@ -1,7 +1,7 @@
 {
   "name": "rom-editor",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.2.0",
   "description": "Locally hosted, web-tech-based editor for Pokemon GBA decomp projects and patch-based ROM workflows.",
   "type": "module",
   "engines": {

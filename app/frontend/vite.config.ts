@@ -26,6 +26,16 @@ export default defineConfig({
       },
     },
   },
+  preview: {
+    host: '127.0.0.1',
+    port: 5173,
+    strictPort: true,
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp',
+    },
+    proxy: { '/api': { target: `http://127.0.0.1:${BACKEND_PORT}`, ws: true } },
+  },
   build: {
     outDir: 'dist',
     sourcemap: true,

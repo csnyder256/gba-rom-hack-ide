@@ -1,0 +1,20 @@
+{
+  "name": "gba-rom-hack-ide",
+  "package_json": [
+    "app/package.json",
+    "app/backend/package.json",
+    "app/frontend/package.json",
+    "app/shared/package.json",
+    "engine/package.json"
+  ],
+  "version_patterns": {
+    "app/backend/src/routes/health.ts": "SERVICE_VERSION = '([^']+)'"
+  },
+  "bundle": "prebuilt",
+  "built": [
+    "engine/dist",
+    "app/shared/dist",
+    "app/backend/dist",
+    "app/frontend/dist"
+  ]
+}
