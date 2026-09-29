@@ -58,7 +58,7 @@ jobs:
             if ($signature.Status -ne 'Valid') { throw 'Installer signature invalid' }
           }
       - run: node desktop/release-assets.cjs win
-      - uses: actions/attest@v3
+      - uses: actions/attest@v4
         id: attestation
         with:
           subject-path: desktop/release-assets/*
@@ -122,7 +122,7 @@ jobs:
           spctl --assess --type execute --verbose=4 "$application"
           xcrun stapler validate "$application"
       - run: node desktop/release-assets.cjs mac
-      - uses: actions/attest@v3
+      - uses: actions/attest@v4
         id: attestation
         with:
           subject-path: desktop/release-assets/*

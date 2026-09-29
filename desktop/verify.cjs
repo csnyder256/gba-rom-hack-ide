@@ -7,6 +7,7 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
  const userData=path.join(qa,'profile'),fixture=path.join(qa,'fictional-project');await fs.mkdir(fixture,{recursive:true});
  await fs.writeFile(path.join(fixture,'README.md'),'Fictional desktop acceptance project. No ROM or copyrighted assets.');
  const app=await _electron.launch({executablePath:process.env.DESKTOP_APP||require('electron'),cwd:__dirname,args:process.env.DESKTOP_APP?launchArgs:[...launchArgs,'.'],env:{...process.env,GBA_DISABLE_UPDATE_CHECKS:'1',GBA_SMOKE_USER_DATA:userData}});
+ const installedVersion=require('./package.json').version;
  let origin;
  try{
   const page=await app.firstWindow();await page.waitForLoadState('domcontentloaded');if(process.env.DESKTOP_CORE_DIAGNOSTIC)page.on('console',m=>console.log(m.text().slice(0,600)));
@@ -21,7 +22,7 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
    try{await other.loadURL('data:text/html,<title>controlled IPC sender probe</title>');return await other.webContents.executeJavaScript("require('electron').ipcRenderer.invoke('desktop:status').then(()=>false).catch(e=>e.message.includes('Untrusted desktop request'))");}finally{other.destroy();}
   });assert.equal(rejected,true);
 
-  const health=await page.evaluate(async()=>{const r=await fetch('/api/health');return{status:r.status,body:await r.json()};});assert.equal(health.status,200);assert.equal(health.body.version,'0.3.0');
+  const health=await page.evaluate(async()=>{const r=await fetch('/api/health');return{status:r.status,body:await r.json()};});assert.equal(health.status,200);assert.equal(health.body.version,installedVersion);
   // Run an original homebrew through the real core and verify its frame output.
   await page.getByRole('button',{name:'Desktop updates',exact:true}).click();await page.keyboard.press('Escape');
   const wasm=await page.evaluate(async(bytes)=>{
@@ -39,7 +40,7 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
   const rootResponse=await page.request.get(origin+'/'); // browser API request context does not receive the Electron session token
   assert.equal(rootResponse.status(),401);
   await page.getByRole('button',{name:'Desktop updates',exact:true}).click();const panel=page.getByRole('dialog');
-  await panel.getByText('Keep your workspace current.').waitFor();assert.match(await panel.textContent(),/Installed 0.3.0/);assert.equal(await panel.getByRole('button',{name:'Check for updates'}).isDisabled(),true);
+  await panel.getByText('Keep your workspace current.').waitFor();assert.ok((await panel.textContent()).includes('Installed '+installedVersion));assert.equal(await panel.getByRole('button',{name:'Check for updates'}).isDisabled(),true);
   await page.keyboard.press('Escape');assert.equal(await panel.count(),0);assert.equal(await page.evaluate(()=>document.activeElement.getAttribute('aria-label')),'Desktop updates');
   await page.evaluate(()=>{window.location.href='https://example.com/';});await page.waitForTimeout(150);assert.equal(new URL(page.url()).origin,origin);
   const popup=await page.evaluate(()=>window.open('https://example.com/')===null);assert.equal(popup,true);

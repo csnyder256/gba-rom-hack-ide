@@ -1,6 +1,6 @@
 {
   "name": "gba-rom-hack-desktop",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "GBA ROM Hack IDE desktop workspace and verified update delivery",
   "main": "main.cjs",

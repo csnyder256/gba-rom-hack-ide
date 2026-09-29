@@ -70,9 +70,28 @@ jobs:
           name: desktop-linux
           path: desktop/release-assets/*
           if-no-files-found: error
+  verify-attestation:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Create explicit attestation verification fixture
+        run: |
+          python -c "import json,os,pathlib; pathlib.Path('attestation-contract.json').write_text(json.dumps({'kind':'workflow-contract-fixture','not_an_installer':True,'source_sha':os.environ['GITHUB_SHA']}))"
+      - uses: actions/attest@v4
+        with:
+          subject-path: attestation-contract.json
+      - name: Verify the real signed provenance and source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh attestation verify attestation-contract.json --repo "$GITHUB_REPOSITORY" --source-digest "$GITHUB_SHA"
   publish-linux:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: verify
+    needs: [verify, verify-attestation]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -90,7 +109,7 @@ jobs:
         run: |
           test "$RELEASE_TAG" = "v$(cat VERSION)"
           python -c "import json,subprocess,pathlib; p=json.loads(pathlib.Path('desktop/release-assets/desktop-provenance-linux.json').read_text()); assert p['source_sha']==subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(); assert p['version']==pathlib.Path('VERSION').read_text().strip()"
-      - uses: actions/attest@v3
+      - uses: actions/attest@v4
         id: attestation
         with:
           subject-path: desktop/release-assets/*
