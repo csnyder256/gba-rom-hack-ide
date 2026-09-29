@@ -40,6 +40,7 @@ jobs:
         working-directory: desktop
         run: npm run verify
       - name: Build unsigned verification directory
+        shell: bash
         working-directory: desktop
         run: npx electron-builder --dir --publish never -c.win.forceCodeSigning=false -c.mac.forceCodeSigning=false -c.mac.notarize=false
       - name: Exercise the packaged desktop
