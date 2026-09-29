@@ -1,7 +1,7 @@
 {
   "name": "@rom-introspection/engine",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Universal Pok\u00e9mon-family GBA ROM workspace reconstruction & full-engine introspection engine.",
   "type": "module",
   "engines": {
