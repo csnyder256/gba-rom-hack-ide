@@ -40,7 +40,7 @@ export async function createServer(options: CreateServerOptions = {}): Promise<F
   await app.register(websocketPlugin);
   await app.register(registerHealthRoute);
   await app.register(registerProjectsRoute, { sessionStore, nativePicker: options.desktopSession?.nativePicker });
-  await app.register(registerAgentRoute, { sessionStore });
+  await app.register(registerAgentRoute, { sessionStore, baseUrl: options.desktopSession?.origin });
   await app.register(registerTileIntelRoute, { sessionStore });
 
   return app;

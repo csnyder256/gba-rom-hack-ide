@@ -7,6 +7,7 @@ const {execFile}=require('node:child_process');
 const {promisify}=require('node:util');
 const {UpdateController}=require('./update-controller.cjs');
 let window,child,origin='',updates,stopping=false,stopped=false,checkTimer;
+if(process.env.GBA_DISABLE_UPDATE_CHECKS==='1'&&process.env.GBA_SMOKE_USER_DATA)app.setPath('userData',path.resolve(process.env.GBA_SMOKE_USER_DATA));
 const lock=app.requestSingleInstanceLock();
 if(!lock)app.quit();
 app.on('second-instance',()=>{if(window){if(window.isMinimized())window.restore();window.focus();}});
@@ -31,7 +32,6 @@ app.on('before-quit',event=>{
 });
 async function ready(){
  const smoke=process.env.GBA_DISABLE_UPDATE_CHECKS==='1';
- if(smoke&&process.env.GBA_SMOKE_USER_DATA)app.setPath('userData',path.resolve(process.env.GBA_SMOKE_USER_DATA));
  const base=app.isPackaged?process.resourcesPath:__dirname;
  const runtimeRoot=app.isPackaged?path.join(base,'runtime'):path.join(__dirname,'stage/runtime');
  const portFile=path.join(app.getPath('userData'),'runtime-port.json');

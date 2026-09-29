@@ -16,7 +16,7 @@ const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=u
 async function start(data){
  if(initializing)return;initializing=true;
  if(!path.isAbsolute(data.runtimeRoot)||!path.isAbsolute(data.managedRoot)||!/^[0-9a-f]{64}$/.test(data.token))throw new Error('Invalid runtime configuration');
- await fs.mkdir(data.managedRoot,{recursive:true});process.env.ROM_EDITOR_MANAGED_ROOT=data.managedRoot;
+ await fs.mkdir(data.managedRoot,{recursive:true});process.env.ROM_EDITOR_MANAGED_ROOT=data.managedRoot;process.env.GBA_DESKTOP_SESSION_TOKEN=data.token;
  const runtime=path.resolve(data.runtimeRoot),frontend=path.join(runtime,'app/frontend/dist');
  const {createServer}=await import(pathToFileURL(path.join(runtime,'app/backend/dist/server.js')).href);
  server=await createServer({logger:false,desktopSession:{token:data.token,origin:()=>origin,nativePicker:pick}});

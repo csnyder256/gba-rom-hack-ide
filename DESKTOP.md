@@ -59,3 +59,7 @@ Do not commit signing material. The preflight reports only missing input names. 
 ## Native project builds
 
 Linux and macOS invoke native Bash and `make modern` with the installed project toolchain. Set `DEVKITARM` or configure the project Makefile as needed. Windows uses the configured devkitPro MSYS2 shell and cpp wrapper. Workspace paths are passed as positional arguments, including spaces and apostrophes. The installer does not bundle a compiler or third-party ROM.
+
+### Emulator and virtual displays
+
+Desktop CI exercises a small original homebrew ROM through the actual packaged core and asserts its green framebuffer, frame progression, and shared memory export. It uses `--use-angle=swiftshader` for software WebGL on the owned virtual display. A Linux desktop without a usable GPU backend can use the same launch flag. The installed application otherwise uses the platform renderer. The 2.5.1 compatibility step checks upstream JavaScript bytes before restoring the editor's existing HEAPU8 export; it does not change the compiled emulator.

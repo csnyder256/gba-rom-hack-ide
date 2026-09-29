@@ -49,7 +49,7 @@ export interface AgentRouteOptions {
   readonly patchStore?: PatchStore;
   /** Base URL the spawned MCP server uses to call back into Fastify
    *  (e.g. propose_patch). Defaults to `http://127.0.0.1:${PORT}`. */
-  readonly baseUrl?: string;
+  readonly baseUrl?: string | (() => string);
   /** Test seam: lets a fake spawner replace the real runAgentTurn. */
   readonly runTurnImpl?: typeof runAgentTurn;
   /** Test seam: lets tests override the binary-discovery result. */
@@ -135,7 +135,7 @@ export async function registerAgentRoute(
   const patchStore = opts.patchStore ?? new PatchStore();
   const runTurn = opts.runTurnImpl ?? runAgentTurn;
   const findClaude = opts.findClaudeImpl ?? findClaudeBinary;
-  const baseUrl = opts.baseUrl ?? `http://127.0.0.1:${process.env.PORT ?? 8717}`;
+  const getBaseUrl = () => (typeof opts.baseUrl === 'function' ? opts.baseUrl() : opts.baseUrl) ?? `http://127.0.0.1:${process.env.PORT ?? 8717}`;
 
   /** Live WS subscribers, indexed by projectId, used to broadcast
    *  out-of-band events (patch_proposed, patch_applied, …) to every
@@ -247,7 +247,7 @@ export async function registerAgentRoute(
           agentSession,
           claudeBinary,
           runTurnImpl: runTurn,
-          baseUrl,
+          baseUrl: getBaseUrl(),
         });
       } finally {
         // Mark the turn as ATTEMPTED (not "succeeded") so isResume=true
@@ -647,7 +647,7 @@ export async function registerAgentRoute(
                   runTurnImpl: runTurn,
                   signal: abort.signal,
                   onEvent: (event) => send({ kind: 'turn_event', event }),
-                  baseUrl,
+                  baseUrl: getBaseUrl(),
                   devMode: parsed.devMode === true,
                   repoRoot: opts.repoRoot,
                 });

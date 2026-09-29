@@ -19,6 +19,7 @@ for(const folder of ['engine','app']){
  if(process.platform==='win32')execFileSync(process.env.ComSpec||'cmd.exe',['/d','/s','/c','npm ci --omit=dev --ignore-scripts --no-audit --no-fund'],options);
  else execFileSync('npm',['ci','--omit=dev','--ignore-scripts','--no-audit','--no-fund'],options);
 }
+for(const folder of ['engine','app/backend'])execFileSync(process.execPath,[path.join(root,'engine/scripts/preserve-mgba-memory.mjs'),path.join(stage,folder)],{stdio:'inherit'});
 // Resources live outside asar; materialize npm workspace/file links so every
 // release contains the same self-contained runtime layout on all platforms.
 async function materialize(dir){

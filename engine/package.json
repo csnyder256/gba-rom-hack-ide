@@ -2,7 +2,7 @@
   "name": "@rom-introspection/engine",
   "private": true,
   "version": "0.3.0",
-  "description": "Universal Pok\u00e9mon-family GBA ROM workspace reconstruction & full-engine introspection engine.",
+  "description": "Universal Pokémon-family GBA ROM workspace reconstruction & full-engine introspection engine.",
   "type": "module",
   "engines": {
     "node": ">=22.0.0 <23"
@@ -23,10 +23,11 @@
   },
   "files": [
     "dist",
-    "src"
+    "src",
+    "scripts"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && node -e \"require('node:fs').mkdirSync('dist/emulator',{recursive:true});require('node:fs').copyFileSync('src/emulator/worker-bridge.mjs','dist/emulator/worker-bridge.mjs')\"",
+    "build": "node scripts/preserve-mgba-memory.mjs && tsc -p tsconfig.json && node -e \"require('node:fs').mkdirSync('dist/emulator',{recursive:true});require('node:fs').copyFileSync('src/emulator/worker-bridge.mjs','dist/emulator/worker-bridge.mjs')\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -38,7 +39,7 @@
     "vitest": "5.0.1"
   },
   "dependencies": {
-    "@thenick775/mgba-wasm": "^2.5.1",
+    "@thenick775/mgba-wasm": "2.5.1",
     "ajv": "^8.20.0"
   }
 }

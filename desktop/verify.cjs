@@ -5,10 +5,10 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
  await fs.mkdir(qa,{recursive:true});
  const userData=path.join(qa,'profile'),fixture=path.join(qa,'fictional-project');await fs.mkdir(fixture,{recursive:true});
  await fs.writeFile(path.join(fixture,'README.md'),'Fictional desktop acceptance project. No ROM or copyrighted assets.');
- const app=await _electron.launch({executablePath:process.env.DESKTOP_APP||require('electron'),cwd:__dirname,args:process.env.DESKTOP_APP?['--no-sandbox']:['--no-sandbox','.'],env:{...process.env,GBA_DISABLE_UPDATE_CHECKS:'1',GBA_SMOKE_USER_DATA:userData}});
+ const app=await _electron.launch({executablePath:process.env.DESKTOP_APP||require('electron'),cwd:__dirname,args:process.env.DESKTOP_APP?['--no-sandbox','--use-angle=swiftshader']:['--no-sandbox','--use-angle=swiftshader','.'],env:{...process.env,GBA_DISABLE_UPDATE_CHECKS:'1',GBA_SMOKE_USER_DATA:userData}});
  let origin;
  try{
-  const page=await app.firstWindow();await page.waitForLoadState('domcontentloaded');
+  const page=await app.firstWindow();await page.waitForLoadState('domcontentloaded');if(process.env.DESKTOP_CORE_DIAGNOSTIC)page.on('console',m=>console.log(m.text().slice(0,600)));
   await page.getByRole('button',{name:'Desktop updates',exact:true}).waitFor({timeout:60000});origin=new URL(page.url()).origin;
   const runtime=await page.evaluate(()=>({node:typeof require,process:typeof process,isolated:crossOriginIsolated,shared:typeof SharedArrayBuffer,bridge:Object.keys(window.GbaDesktop).sort()}));
   assert.equal(runtime.node,'undefined');assert.equal(runtime.process,'undefined');assert.equal(runtime.isolated,true);assert.equal(runtime.shared,'function');assert.deepEqual(runtime.bridge,['check','download','install','onStatus','status']);
@@ -21,13 +21,20 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
   });assert.equal(rejected,true);
 
   const health=await page.evaluate(async()=>{const r=await fetch('/api/health');return{status:r.status,body:await r.json()};});assert.equal(health.status,200);assert.equal(health.body.version,'0.3.0');
-  // Boot the real packaged WASM runtime and its pthread workers without a ROM.
-  const wasm=await page.evaluate(async()=>{
+  // Run an original homebrew through the real core and verify its frame output.
+  await page.getByRole('button',{name:'Desktop updates',exact:true}).click();await page.keyboard.press('Escape');
+  const wasm=await page.evaluate(async(bytes)=>{
    const {default:factory}=await import('/api/emulator-engine/mgba.js');
-   const canvas=document.createElement('canvas');canvas.width=240;canvas.height=160;canvas.hidden=true;document.body.append(canvas);
+   const canvas=document.createElement('canvas');canvas.width=240;canvas.height=160;canvas.id='desktop-acceptance-canvas';Object.assign(canvas.style,{position:'fixed',top:'20px',left:'20px',zIndex:'99999'});document.body.append(canvas);
    const emu=await factory({canvas,locateFile:(file,dir)=>file.endsWith('.wasm')?'/api/emulator-engine/mgba.wasm':dir+file});
-   return{memory:emu.HEAPU8?.byteLength||0,loadGame:typeof emu.loadGame,buttonPress:typeof emu.buttonPress};
-  });assert.ok(wasm.memory>0);assert.equal(wasm.loadGame,'function');assert.equal(wasm.buttonPress,'function');
+   await emu.FSInit();emu.FS.writeFile('/data/games/owned-acceptance.gba',new Uint8Array(bytes));
+   const loaded=emu.loadGame('/data/games/owned-acceptance.gba');let frames=0;emu.addCoreCallbacks({videoFrameEndedCallback:()=>{frames++;}});emu.resumeAudio();
+   const until=Date.now()+15000;while(frames<30&&Date.now()<until)await new Promise(r=>setTimeout(r,50));
+   const screenshot=emu.screenshot('owned-acceptance.png');const image=screenshot?Array.from(emu.FS.readFile('/data/screenshots/owned-acceptance.png')):[];
+   const result={memory:emu.HEAPU8?.byteLength||0,loadGame:typeof emu.loadGame,buttonPress:typeof emu.buttonPress,loaded,frames,image};window.__desktopAcceptanceEmu=emu;return result;
+  },Array.from(require('./test/homebrew.cjs').makeHomebrew()));assert.equal(wasm.loaded,true);assert.ok(wasm.frames>=30);assert.ok(wasm.image.length>0);
+  await fs.writeFile(path.join(qa,'core.png'),Buffer.from(wasm.image));const rendered=await page.locator('#desktop-acceptance-canvas').screenshot();await fs.writeFile(path.join(qa,'rendered-frame.png'),rendered);const pixels=require('pngjs').PNG.sync.read(rendered).data;let green=0;for(let i=0;i<pixels.length;i+=4)if(pixels[i+1]>180&&pixels[i]<30&&pixels[i+2]<30)green++;assert.ok(green>30000,'Original homebrew framebuffer did not render');delete wasm.image;wasm.greenPixels=green;await page.evaluate(()=>{window.__desktopAcceptanceEmu.quitGame();document.querySelector('#desktop-acceptance-canvas').remove();});
+  assert.ok(wasm.memory>0);assert.equal(wasm.loadGame,'function');assert.equal(wasm.buttonPress,'function');
   const rootResponse=await page.request.get(origin+'/'); // browser API request context does not receive the Electron session token
   assert.equal(rootResponse.status(),401);
   await page.getByRole('button',{name:'Desktop updates',exact:true}).click();const panel=page.getByRole('dialog');
@@ -47,7 +54,7 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
  }finally{await app.close();}
  if(origin){
   await new Promise(r=>setTimeout(r,100));await assert.rejects(()=>fetch(origin+'/api/health'));console.log('Owned backend closed with desktop.');
-  const next=await _electron.launch({executablePath:process.env.DESKTOP_APP||require('electron'),cwd:__dirname,args:process.env.DESKTOP_APP?['--no-sandbox']:['--no-sandbox','.'],env:{...process.env,GBA_DISABLE_UPDATE_CHECKS:'1',GBA_SMOKE_USER_DATA:userData}});
+  const next=await _electron.launch({executablePath:process.env.DESKTOP_APP||require('electron'),cwd:__dirname,args:process.env.DESKTOP_APP?['--no-sandbox','--use-angle=swiftshader']:['--no-sandbox','--use-angle=swiftshader','.'],env:{...process.env,GBA_DISABLE_UPDATE_CHECKS:'1',GBA_SMOKE_USER_DATA:userData}});
   try{const page=await next.firstWindow();await page.getByRole('button',{name:'Desktop updates',exact:true}).waitFor({timeout:60000});assert.equal(new URL(page.url()).origin,origin);assert.equal(await page.evaluate(()=>localStorage.getItem('__desktop_lifecycle_test__')),'kept');console.log('Workspace preferences survive restart on the stored local origin.');}finally{await next.close();}
  }
 })().catch(e=>{console.error(e);process.exitCode=1});

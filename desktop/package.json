@@ -26,7 +26,8 @@
   "devDependencies": {
     "electron": "44.4.5",
     "electron-builder": "26.15.3",
-    "playwright": "1.63.0"
+    "playwright": "1.63.0",
+    "pngjs": "7.0.0"
   },
   "desktopName": "io.github.csnyder256.gba-rom-hack-ide.desktop"
 }
