@@ -2,7 +2,7 @@
 
 ## Prebuilt local application
 
-Download the `v0.3.0-prebuilt` ZIP or tarball from [Releases](https://github.com/csnyder256/gba-rom-hack-ide/releases). Verify SHA-256 against `checksums.txt`. Extract it, install **Node.js 22**, then run from the extracted folder:
+Download the `v0.3.1-prebuilt` ZIP or tarball from [Releases](https://github.com/csnyder256/gba-rom-hack-ide/releases). Verify SHA-256 against `checksums.txt`. Extract it, install **Node.js 22**, then run from the extracted folder:
 
 ```sh
 npm ci --prefix engine

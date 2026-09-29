@@ -2,13 +2,13 @@
 
 ## Linux release
 
-Download the versioned `GBA-ROM-Hack-IDE-0.3.0-linux-x86_64.AppImage`, `desktop-checksums-linux.txt`, source provenance and attestation from [v0.3.0](https://github.com/csnyder256/gba-rom-hack-ide/releases/tag/v0.3.0). Verify the SHA-256 and the signed build provenance before making the AppImage executable:
+Download the versioned `GBA-ROM-Hack-IDE-0.3.1-linux-x86_64.AppImage`, `desktop-checksums-linux.txt`, source provenance and attestation from [v0.3.1](https://github.com/csnyder256/gba-rom-hack-ide/releases/tag/v0.3.1). Verify the SHA-256 and the signed build provenance before making the AppImage executable:
 
 ```sh
 sha256sum -c desktop-checksums-linux.txt
-gh attestation verify GBA-ROM-Hack-IDE-0.3.0-linux-x86_64.AppImage --repo csnyder256/gba-rom-hack-ide
-chmod +x GBA-ROM-Hack-IDE-0.3.0-linux-x86_64.AppImage
-./GBA-ROM-Hack-IDE-0.3.0-linux-x86_64.AppImage
+gh attestation verify GBA-ROM-Hack-IDE-0.3.1-linux-x86_64.AppImage --repo csnyder256/gba-rom-hack-ide
+chmod +x GBA-ROM-Hack-IDE-0.3.1-linux-x86_64.AppImage
+./GBA-ROM-Hack-IDE-0.3.1-linux-x86_64.AppImage
 ```
 
 Keep all checksum-listed assets together when using `sha256sum -c`. AppImage requires your distribution's FUSE support; extracting it with `--appimage-extract` is an alternative for systems without FUSE. Extracted-directory launches use manual upgrades. No separate Node.js installation is required for the desktop app. No ROMs are supplied. Decompilation builds still require the project's toolchain; the optional local agent still needs its separately installed CLI and account.

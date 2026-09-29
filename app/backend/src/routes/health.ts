@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { HealthResponse } from '@rom-editor/shared';
 
 const SERVICE_NAME = 'rom-editor-backend';
-const SERVICE_VERSION = '0.3.0';
+const SERVICE_VERSION = '0.3.1';
 const startedAt = Date.now();
 
 export async function registerHealthRoute(app: FastifyInstance): Promise<void> {
