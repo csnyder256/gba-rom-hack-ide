@@ -462,3 +462,10 @@ path targets Complete Fire Red Upgrade, whose upstream terms are
 non-commercial. Those terms still apply to that path.
 
 Built by Cade (https://github.com/csnyder256)
+
+
+## Release downloads and deployment
+
+[Latest release](https://github.com/csnyder256/gba-rom-hack-ide/releases/latest) · [Install, deploy and upgrade](DEPLOYMENT.md)
+
+Release assets include checksums and version-specific notes.

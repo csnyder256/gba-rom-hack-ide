@@ -129,3 +129,6 @@ npm-debug.log*
 *.swo
 .DS_Store
 Thumbs.db
+
+# Release build output
+dist-release/
