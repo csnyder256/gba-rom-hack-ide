@@ -27,6 +27,10 @@ jobs:
       - name: Build app
         working-directory: app
         run: npm ci && npm run build
+      - name: Verify native build toolchain invocation
+        if: runner.os != 'Windows'
+        working-directory: app/backend
+        run: npx vitest run src/build/decomp-build-native.test.ts
       - name: Install desktop tooling
         working-directory: desktop
         run: npm ci

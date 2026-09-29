@@ -55,3 +55,7 @@ The `Signed desktop releases` workflow is disabled independently per platform un
 Do not commit signing material. The preflight reports only missing input names. Production builds require signing; Windows checks `Get-AuthenticodeSignature`, and macOS verifies codesign, Gatekeeper and stapled notarization. Unsigned PR verification directories are temporary CI checks and are never uploaded as production installers. After configuring an identity, dispatch the signing workflow against an existing stable tag; it adds matching signed platform assets and update feeds to that release.
 
 [Electron signing](https://www.electronjs.org/docs/latest/tutorial/code-signing), [electron-builder signing](https://www.electron.build/docs/features/code-signing/) and [GitHub attestation verification](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations) describe the underlying trust mechanisms.
+
+## Native project builds
+
+Linux and macOS invoke native Bash and `make modern` with the installed project toolchain. Set `DEVKITARM` or configure the project Makefile as needed. Windows uses the configured devkitPro MSYS2 shell and cpp wrapper. Workspace paths are passed as positional arguments, including spaces and apostrophes. The installer does not bundle a compiler or third-party ROM.

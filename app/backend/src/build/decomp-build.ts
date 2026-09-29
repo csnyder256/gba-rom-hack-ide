@@ -120,24 +120,30 @@ export async function startDecompBuild(
   if (!(await fileExists(path.join(projectRoot, 'Makefile')))) {
     return { error: 'No Makefile here - Build & Play needs a decomp source project.' };
   }
-  const bash = await findMsysBash();
+  const windows = process.platform === 'win32';
+  const nativeBash = process.env.ROM_EDITOR_MSYS_BASH || '/bin/bash';
+  const bash = windows ? await findMsysBash() : await fileExists(nativeBash) ? nativeBash : null;
   if (!bash) {
     return {
       error:
-        'Could not find devkitPro MSYS2 bash (looked for C:\\devkitPro\\msys2\\usr\\bin\\bash.exe). ' +
-        'Set ROM_EDITOR_MSYS_BASH to its full path.',
+        windows
+          ? 'Could not find devkitPro MSYS2 bash. Set ROM_EDITOR_MSYS_BASH to its full path.'
+          : 'Could not find bash. Install bash and your project toolchain, or set ROM_EDITOR_MSYS_BASH to the shell path.',
     };
   }
 
   const jobsN = Math.max(1, os.cpus().length);
-  const unixProj = toMsysPath(projectRoot);
-  const script = `export PATH="$DEVKITARM/bin:$PATH"; cd '${unixProj}' && make modern -j${jobsN} CPP=${CPP_WRAPPER}`;
+  const unixProj = windows ? toMsysPath(projectRoot) : projectRoot;
+  // Pass the workspace as a positional argument, never as shell source. Native
+  // hosts use their installed toolchain; Windows retains its MSYS2 cpp wrapper.
+  const script = `if [ -n "\${DEVKITARM:-}" ]; then export PATH="$DEVKITARM/bin:$PATH"; fi; cd -- "$1" && make modern -j${jobsN}${windows ? ' CPP=' + CPP_WRAPPER : ''}`;
+  const shellMode = windows ? '-lc' : '-c';
 
   const job: DecompBuildJob = {
     id: randomUUID(),
     sessionId,
     projectRoot,
-    command: `${bash} -lc "${script}"`,
+    command: `${bash} ${shellMode} [project root supplied as an argument]`,
     startedAtUtc: new Date().toISOString(),
     state: 'running',
     log: '',
@@ -148,7 +154,7 @@ export async function startDecompBuild(
   };
   jobs.set(job.id, job);
 
-  const child = spawn(bash, ['-lc', script], { cwd: projectRoot });
+  const child = spawn(bash, [shellMode, script, 'gba-build', unixProj], { cwd: projectRoot });
 
   const killTimer = setTimeout(() => {
     appendLog(job, '\n[timeout] build exceeded 30 min - terminating.\n');
