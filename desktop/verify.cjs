@@ -3,9 +3,10 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
 (async()=>{
  const qa=path.resolve(process.env.DESKTOP_QA_DIR||await fs.mkdtemp(path.join(os.tmpdir(),'gba-desktop-qa-')));
  await fs.mkdir(qa,{recursive:true});
+ const launchArgs=['--no-sandbox',...(process.platform==='linux'?['--use-angle=swiftshader']:[])];
  const userData=path.join(qa,'profile'),fixture=path.join(qa,'fictional-project');await fs.mkdir(fixture,{recursive:true});
  await fs.writeFile(path.join(fixture,'README.md'),'Fictional desktop acceptance project. No ROM or copyrighted assets.');
- const app=await _electron.launch({executablePath:process.env.DESKTOP_APP||require('electron'),cwd:__dirname,args:process.env.DESKTOP_APP?['--no-sandbox','--use-angle=swiftshader']:['--no-sandbox','--use-angle=swiftshader','.'],env:{...process.env,GBA_DISABLE_UPDATE_CHECKS:'1',GBA_SMOKE_USER_DATA:userData}});
+ const app=await _electron.launch({executablePath:process.env.DESKTOP_APP||require('electron'),cwd:__dirname,args:process.env.DESKTOP_APP?launchArgs:[...launchArgs,'.'],env:{...process.env,GBA_DISABLE_UPDATE_CHECKS:'1',GBA_SMOKE_USER_DATA:userData}});
  let origin;
  try{
   const page=await app.firstWindow();await page.waitForLoadState('domcontentloaded');if(process.env.DESKTOP_CORE_DIAGNOSTIC)page.on('console',m=>console.log(m.text().slice(0,600)));
@@ -33,7 +34,7 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
    const screenshot=emu.screenshot('owned-acceptance.png');const image=screenshot?Array.from(emu.FS.readFile('/data/screenshots/owned-acceptance.png')):[];
    const result={memory:emu.HEAPU8?.byteLength||0,loadGame:typeof emu.loadGame,buttonPress:typeof emu.buttonPress,loaded,frames,image};window.__desktopAcceptanceEmu=emu;return result;
   },Array.from(require('./test/homebrew.cjs').makeHomebrew()));assert.equal(wasm.loaded,true);assert.ok(wasm.frames>=30);assert.ok(wasm.image.length>0);
-  await fs.writeFile(path.join(qa,'core.png'),Buffer.from(wasm.image));const rendered=await page.locator('#desktop-acceptance-canvas').screenshot();await fs.writeFile(path.join(qa,'rendered-frame.png'),rendered);const pixels=require('pngjs').PNG.sync.read(rendered).data;let green=0;for(let i=0;i<pixels.length;i+=4)if(pixels[i+1]>180&&pixels[i]<30&&pixels[i+2]<30)green++;assert.ok(green>30000,'Original homebrew framebuffer did not render');delete wasm.image;wasm.greenPixels=green;await page.evaluate(()=>{window.__desktopAcceptanceEmu.quitGame();document.querySelector('#desktop-acceptance-canvas').remove();});
+  await fs.writeFile(path.join(qa,'core.png'),Buffer.from(wasm.image));const rendered=await page.locator('#desktop-acceptance-canvas').screenshot();await fs.writeFile(path.join(qa,'rendered-frame.png'),rendered);const pixels=require('pngjs').PNG.sync.read(rendered).data;let green=0;for(let i=0;i<pixels.length;i+=4)if(pixels[i+1]>180&&pixels[i]<30&&pixels[i+2]<30)green++;assert.ok(green>30000,`Original homebrew framebuffer did not render (${green} green pixels of ${pixels.length/4}); see rendered-frame.png`);delete wasm.image;wasm.greenPixels=green;await page.evaluate(()=>{window.__desktopAcceptanceEmu.quitGame();document.querySelector('#desktop-acceptance-canvas').remove();});
   assert.ok(wasm.memory>0);assert.equal(wasm.loadGame,'function');assert.equal(wasm.buttonPress,'function');
   const rootResponse=await page.request.get(origin+'/'); // browser API request context does not receive the Electron session token
   assert.equal(rootResponse.status(),401);
@@ -54,7 +55,7 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
  }finally{await app.close();}
  if(origin){
   await new Promise(r=>setTimeout(r,100));await assert.rejects(()=>fetch(origin+'/api/health'));console.log('Owned backend closed with desktop.');
-  const next=await _electron.launch({executablePath:process.env.DESKTOP_APP||require('electron'),cwd:__dirname,args:process.env.DESKTOP_APP?['--no-sandbox','--use-angle=swiftshader']:['--no-sandbox','--use-angle=swiftshader','.'],env:{...process.env,GBA_DISABLE_UPDATE_CHECKS:'1',GBA_SMOKE_USER_DATA:userData}});
+  const next=await _electron.launch({executablePath:process.env.DESKTOP_APP||require('electron'),cwd:__dirname,args:process.env.DESKTOP_APP?launchArgs:[...launchArgs,'.'],env:{...process.env,GBA_DISABLE_UPDATE_CHECKS:'1',GBA_SMOKE_USER_DATA:userData}});
   try{const page=await next.firstWindow();await page.getByRole('button',{name:'Desktop updates',exact:true}).waitFor({timeout:60000});assert.equal(new URL(page.url()).origin,origin);assert.equal(await page.evaluate(()=>localStorage.getItem('__desktop_lifecycle_test__')),'kept');console.log('Workspace preferences survive restart on the stored local origin.');}finally{await next.close();}
  }
 })().catch(e=>{console.error(e);process.exitCode=1});
