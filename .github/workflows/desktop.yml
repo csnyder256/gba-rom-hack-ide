@@ -51,6 +51,38 @@ jobs:
       - name: Exercise the packaged desktop
         working-directory: desktop
         run: node verify-packaged.cjs
+      # Build installer containers on native runners before owner signing is configured.
+      # These unsigned QA packages stay on the runner and are never release assets.
+      - name: Build Windows installer without owner signing
+        if: runner.os == 'Windows'
+        working-directory: desktop
+        shell: bash
+        run: npx electron-builder --win nsis --publish never -c.win.forceCodeSigning=false
+      - name: Verify Windows installer packaging without owner signing
+        if: runner.os == 'Windows'
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem dist -File -Filter 'GBA-ROM-Hack-IDE-*-win-*.exe')
+          if ($installers.Count -ne 1 -or $installers[0].Length -lt 1000000) { throw 'Expected one complete Windows installer' }
+          if ((Get-AuthenticodeSignature $installers[0].FullName).Status -ne 'NotSigned') { throw 'Packaging QA must stay unsigned' }
+          Write-Output 'Unsigned Windows installer format verified; not published'
+      - name: Verify macOS disk image and ZIP packaging without owner signing
+        if: runner.os == 'macOS'
+        working-directory: desktop
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx electron-builder --mac dmg zip --publish never -c.mac.forceCodeSigning=false -c.mac.notarize=false
+          test "$(find dist -maxdepth 1 -type f -name 'GBA-ROM-Hack-IDE-*.dmg' | wc -l)" -eq 1
+          test "$(find dist -maxdepth 1 -type f -name 'GBA-ROM-Hack-IDE-*.zip' | wc -l)" -eq 1
+          dmg=$(find dist -maxdepth 1 -type f -name 'GBA-ROM-Hack-IDE-*.dmg' -print)
+          zip=$(find dist -maxdepth 1 -type f -name 'GBA-ROM-Hack-IDE-*.zip' -print)
+          test -s "$dmg"
+          test -s "$zip"
+          hdiutil verify "$dmg"
+          unzip -tqq "$zip"
+          echo 'Unsigned macOS installer formats verified; not published'
       - name: Retain native desktop acceptance evidence
         if: always()
         uses: actions/upload-artifact@v7
