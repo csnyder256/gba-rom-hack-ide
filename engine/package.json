@@ -36,7 +36,7 @@
     "@types/node": "22.20.4",
     "@vitest/coverage-v8": "5.0.1",
     "typescript": "5.9.3",
-    "vitest": "5.0.1"
+    "vitest": "5.0.2"
   },
   "dependencies": {
     "@thenick775/mgba-wasm": "2.5.1",
