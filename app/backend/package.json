@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@fastify/websocket": "11.3.1",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.30.1",
     "@rom-editor/shared": "*",
     "@rom-introspection/engine": "file:../../engine",
     "fastify": "5.12.5",
