@@ -18,12 +18,30 @@
  * original.length`) are not meaningful in IPS (the spec has no "erase"
  * record) and remain an error.
  *
+ * Addressable range: a 3-byte offset field means IPS can only describe
+ * byte positions 0..IPS_MAX_OFFSET (0xFFFFFE), and 0x454F46 is reserved
+ * for the "EOF" terminator and can never be written. Bytes at or beyond
+ * IPS_MAX_OFFSET + 1 exist in a 16-32 MiB ROM but CANNOT be represented
+ * in an IPS patch at all. Records are therefore emitted only for
+ * differing bytes BELOW IPS_MAX_OFFSET: a literal is truncated to end
+ * at IPS_MAX_OFFSET, and an RLE run is truncated to end there too. Any
+ * difference covering only out-of-range bytes is skipped. The caller
+ * learns how much was dropped via `ProduceIpsRecordsOptions`'s
+ * companion `produceIpsRecordsWithReport`, and the remainder is
+ * exactly what the BPS format (whose offsets are variable-length) is
+ * for. Without this bound the diff could hand the encoder a record
+ * whose body runs past IPS_MAX_OFFSET, and `applyIps` would then grow
+ * the reconstructed ROM past the range IPS can address - so the patch
+ * is accepted, applied, and silently wrong for every byte after the
+ * limit.
+ *
  * Determinism: records are emitted in ascending offset order, never
  * overlap, and never have zero length.
  */
 
 import {
   IPS_MAX_LITERAL_LENGTH,
+  IPS_MAX_OFFSET,
   IPS_MAX_RLE_LENGTH,
   IPS_RESERVED_EOF_OFFSET,
   IPS_RLE_BREAK_EVEN_LENGTH,
@@ -37,25 +55,56 @@ export interface ProduceIpsRecordsOptions {
   readonly rleThreshold?: number;
 }
 
-/** Produce IPS records that transform `original` → `modified`. */
-export function produceIpsRecords(
+/** What a diff run produced, plus the bytes IPS could not describe.
+ *  `unrepresentableRanges` holds `[start, end)` spans of `modified`
+ *  whose bytes differ from `original` but sit at or past
+ *  IPS_MAX_OFFSET + 1, where a 3-byte IPS offset cannot reach. A
+ *  non-empty list means the emitted records reproduce `modified` only
+ *  up to IPS_MAX_OFFSET; the caller must use BPS (variable-length
+ *  offsets) to carry the rest. Callers that don't care keep using
+ *  `produceIpsRecords`.
+ */
+export interface IpsDiffReport {
+  readonly records: ReadonlyArray<IpsRecord>;
+  readonly unrepresentableRanges: ReadonlyArray<readonly [number, number]>;
+  /** Total count of differing bytes at or past IPS_MAX_OFFSET + 1. */
+  readonly unrepresentableBytes: number;
+}
+
+/** Produce IPS records that transform `original` → `modified`, and
+ *  report any differing bytes the IPS offset space cannot address. */
+export function produceIpsRecordsWithReport(
   original: Uint8Array,
   modified: Uint8Array,
   opts?: ProduceIpsRecordsOptions,
-): ReadonlyArray<IpsRecord> {
+): IpsDiffReport {
   if (modified.length < original.length) {
     throw new IpsFormatError(
       `produceIpsRecords cannot shrink ROMs (IPS has no erase record); got original=${String(original.length)} modified=${String(modified.length)}`,
     );
   }
-  // Note: we DON'T error on buffers > IPS_MAX_OFFSET+1 here. The
-  // encoder enforces per-record offset bounds. A 16 MiB ROM is
-  // patchable for offsets 0..IPS_MAX_OFFSET; the trailing few bytes
-  // (≥ 0x454F46 collision range or > 0xFFFFFE) simply can't be
-  // included in IPS records. Throwing upfront prevents legitimate
-  // patches of the addressable portion.
+  // Bytes with an index >= original.length have no counterpart in the
+  // base ROM, so they always enter a diff run (growing patch).
+  //
+  // The upper bound is the real limit and it is deliberate: a record's
+  // 3-byte offset only names where it STARTS, and the format has no way
+  // to say "and stop before the end of the address space". A record
+  // starting at 0xFFFFFC with four bytes of data is encodable, decodable
+  // and silently truncating - `applyIps` grows the output to
+  // 0x1000000, so the reconstructed ROM carries bytes in a region no IPS
+  // patcher can express or verify. Guarding only the start offset (which
+  // is what `encodeIps` does) is not enough; the diff must never emit a
+  // byte past IPS_MAX_OFFSET in the first place.
+  const diffLimit = Math.min(modified.length, IPS_MAX_OFFSET + 1);
   const rleThreshold = Math.max(2, opts?.rleThreshold ?? IPS_RLE_BREAK_EVEN_LENGTH);
   const records: IpsRecord[] = [];
+  const unrepresentableRanges: Array<readonly [number, number]> = [];
+  let unrepresentableBytes = 0;
+  const noteUnrepresentable = (start: number, end: number): void => {
+    if (end <= start) return;
+    unrepresentableRanges.push(Object.freeze([start, end] as const));
+    unrepresentableBytes += end - start;
+  };
   // Helper: read original[i] safely. Past `original.length` (growing
   // patch case), return a sentinel that ALWAYS differs from any
   // possible `modified[i]` so the byte enters a diff run.
@@ -73,10 +122,15 @@ export function produceIpsRecords(
     while (runEnd < modified.length && modified[runEnd] !== origByte(runEnd)) {
       runEnd++;
     }
-    // Now process [i, runEnd) - could be one literal, possibly with
-    // RLE sub-runs inside.
+    // Everything at or past the IPS ceiling is reported, never emitted.
+    if (runEnd > diffLimit) {
+      noteUnrepresentable(Math.max(i, diffLimit), runEnd);
+    }
+    // Now process [i, min(runEnd, diffLimit)) - could be one literal,
+    // possibly with RLE sub-runs inside.
+    const emitEnd = Math.min(runEnd, diffLimit);
     let cursor = i;
-    while (cursor < runEnd) {
+    while (cursor < emitEnd) {
       // Skip "EOF"-collision offsets by splitting the record. If the
       // record would start at the reserved 0x454F46 offset, emit a
       // 1-byte literal that ends at 0x454F46+1 instead.
@@ -95,7 +149,7 @@ export function produceIpsRecords(
       const rleByte = modified[cursor]!;
       let rleEnd = cursor;
       while (
-        rleEnd < runEnd &&
+        rleEnd < emitEnd &&
         modified[rleEnd] === rleByte &&
         rleEnd - cursor < IPS_MAX_RLE_LENGTH
       ) {
@@ -118,7 +172,7 @@ export function produceIpsRecords(
       // the end of the differing run OR IPS_MAX_LITERAL_LENGTH.
       let literalEnd = cursor;
       while (
-        literalEnd < runEnd &&
+        literalEnd < emitEnd &&
         literalEnd - cursor < IPS_MAX_LITERAL_LENGTH
       ) {
         // Stop if we hit a long enough run of identical bytes
@@ -126,7 +180,7 @@ export function produceIpsRecords(
         const nextByte = modified[literalEnd]!;
         let runFwd = literalEnd;
         while (
-          runFwd < runEnd &&
+          runFwd < emitEnd &&
           modified[runFwd] === nextByte &&
           runFwd - literalEnd < rleThreshold
         ) {
@@ -154,5 +208,26 @@ export function produceIpsRecords(
     }
     i = runEnd;
   }
-  return Object.freeze(records);
+  return Object.freeze({
+    records: Object.freeze(records),
+    unrepresentableRanges: Object.freeze(unrepresentableRanges),
+    unrepresentableBytes,
+  });
+}
+
+/** Produce IPS records that transform `original` → `modified`.
+ *
+ *  Convenience wrapper over `produceIpsRecordsWithReport` for callers
+ *  whose buffers are known to fit the IPS offset space. It returns the
+ *  same records as before; it does not silently drop anything the
+ *  report would have flagged, because bytes at or past IPS_MAX_OFFSET + 1
+ *  were never emittable in the first place. Callers that need to know
+ *  whether a diff was complete should use the reporting variant.
+ */
+export function produceIpsRecords(
+  original: Uint8Array,
+  modified: Uint8Array,
+  opts?: ProduceIpsRecordsOptions,
+): ReadonlyArray<IpsRecord> {
+  return produceIpsRecordsWithReport(original, modified, opts).records;
 }

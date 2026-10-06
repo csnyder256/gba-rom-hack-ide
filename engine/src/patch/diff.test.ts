@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { IpsFormatError, applyIps, encodeIps, decodeIps } from './ips.js';
-import { produceIpsRecords } from './diff.js';
+import { IPS_MAX_OFFSET, IpsFormatError, applyIps, encodeIps, decodeIps } from './ips.js';
+import { produceIpsRecords, produceIpsRecordsWithReport } from './diff.js';
 
 describe('produceIpsRecords - happy paths', () => {
   it('emits empty record list when original === modified', () => {
@@ -150,5 +150,98 @@ describe('produceIpsRecords - RLE threshold', () => {
     const records = produceIpsRecords(original, modified, { rleThreshold: 4 });
     expect(records.length).toBe(1);
     expect(records[0]?.kind).toBe('rle');
+  });
+});
+
+describe('produceIpsRecords - the IPS address ceiling', () => {
+  // IPS records carry a 3-byte offset, so the last byte position the
+  // format can describe is IPS_MAX_OFFSET (0xFFFFFE) - which means a
+  // 16 MiB (0x1000000-byte) ROM has exactly one byte, its last, that no
+  // IPS patch can ever reach. A record's offset field names where the
+  // record STARTS, so a diff that began a record below the ceiling but
+  // let its payload run past it used to hand `applyIps` a byte no
+  // patcher could produce or verify.
+  const ROM_16MIB = 0x1000000;
+  // Addressable byte positions are 0..IPS_MAX_OFFSET, i.e. a buffer of
+  // IPS_MAX_OFFSET + 1 bytes is the largest fully representable ROM.
+  const LAST_ADDRESSABLE_INDEX = IPS_MAX_OFFSET; // 0xFFFFFE
+  const ceilBase = (): { original: Uint8Array; modified: Uint8Array } => {
+    const original = new Uint8Array(ROM_16MIB);
+    return { original, modified: new Uint8Array(original) };
+  };
+
+  it('truncates a literal that would run past the ceiling', () => {
+    const { original, modified } = ceilBase();
+    // Three changed bytes: 0xFFFFFD + 0xFFFFFE are addressable, 0xFFFFFF
+    // is one past the last position IPS can name.
+    for (let i = 0; i < 3; i++) modified[LAST_ADDRESSABLE_INDEX - 1 + i] = 0xaa + i;
+    const report = produceIpsRecordsWithReport(original, modified);
+    expect(report.records.length).toBe(1);
+    const rec = report.records[0]!;
+    expect(rec.kind).toBe('literal');
+    expect(rec.offset).toBe(LAST_ADDRESSABLE_INDEX - 1);
+    if (rec.kind === 'literal') {
+      expect(rec.data.length).toBe(2);
+      expect(rec.offset + rec.data.length).toBe(IPS_MAX_OFFSET + 1);
+    }
+    expect(report.unrepresentableBytes).toBe(1);
+    expect(report.unrepresentableRanges).toEqual([[ROM_16MIB - 1, ROM_16MIB]]);
+  });
+
+  it('truncates an RLE run that would run past the ceiling', () => {
+    const { original } = ceilBase();
+    // 32 identical bytes starting at 0xFFFFF0: 15 land inside the
+    // addressable window (>= the RLE break-even of 8, so this must stay
+    // an RLE record) and 17 fall off the end. The ROM grows by 16 bytes
+    // so the run has a tail to fall off with.
+    const runStart = LAST_ADDRESSABLE_INDEX - 14;
+    const modified = new Uint8Array(ROM_16MIB + 16);
+    modified.set(original);
+    for (let i = 0; i < 32; i++) modified[runStart + i] = 0x77;
+    const report = produceIpsRecordsWithReport(original, modified);
+    expect(report.records.length).toBe(1);
+    const rec = report.records[0]!;
+    expect(rec.kind).toBe('rle');
+    if (rec.kind === 'rle') {
+      expect(rec.offset).toBe(runStart);
+      expect(rec.rleLength).toBe(15);
+      expect(rec.offset + rec.rleLength).toBe(IPS_MAX_OFFSET + 1);
+    }
+    expect(report.unrepresentableBytes).toBe(17);
+    // The emitted records must survive the encoder, which now also
+    // refuses to write past the ceiling.
+    expect(() => encodeIps(report.records)).not.toThrow();
+  });
+
+  it('reports whole runs that sit entirely past the ceiling', () => {
+    const { original } = ceilBase();
+    // A growing patch: 64 new bytes appended past the addressable window.
+    const grown = new Uint8Array(ROM_16MIB + 64);
+    grown.set(original);
+    for (let i = 0; i < 64; i++) grown[ROM_16MIB + i] = 0xee;
+    const report = produceIpsRecordsWithReport(original, grown);
+    expect(report.records.length).toBe(0);
+    expect(report.unrepresentableBytes).toBe(64);
+    expect(report.unrepresentableRanges).toEqual([[ROM_16MIB, ROM_16MIB + 64]]);
+  });
+
+  it('produceIpsRecords stays a records-only view of the same diff', () => {
+    const { original, modified } = ceilBase();
+    for (let i = 0; i < 3; i++) modified[LAST_ADDRESSABLE_INDEX - 1 + i] = 0xaa + i;
+    const records = produceIpsRecords(original, modified);
+    const report = produceIpsRecordsWithReport(original, modified);
+    expect(records).toEqual(report.records);
+  });
+
+  it('a fully in-range diff round-trips through encode → decode → apply', () => {
+    const original = new Uint8Array(1024);
+    const modified = new Uint8Array(original);
+    modified[100] = 0xde;
+    modified[101] = 0xad;
+    const report = produceIpsRecordsWithReport(original, modified);
+    expect(report.unrepresentableBytes).toBe(0);
+    expect(report.unrepresentableRanges).toEqual([]);
+    const decoded = decodeIps(encodeIps(report.records));
+    expect(applyIps(original, decoded)).toEqual(modified);
   });
 });

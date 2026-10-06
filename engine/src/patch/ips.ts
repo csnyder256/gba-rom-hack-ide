@@ -95,6 +95,18 @@ export function encodeIps(records: ReadonlyArray<IpsRecord>): Uint8Array {
         `record offset 0x454F46 is reserved (collides with EOF footer marker)`,
       );
     }
+    // The offset field names where the record STARTS, so a record that
+    // begins below the ceiling can still write byte positions the format
+    // cannot address. `applyIps` happily grows the output to that end,
+    // producing a ROM whose tail no IPS patcher could produce or check -
+    // a silent truncation, not an error. Reject it here so the encoder
+    // can never emit a patch that decodes to more than IPS can describe.
+    const recordEnd = r.kind === 'literal' ? r.offset + r.data.length : r.offset + r.rleLength;
+    if (recordEnd > IPS_MAX_OFFSET + 1) {
+      throw new IpsFormatError(
+        `record at offset 0x${r.offset.toString(16)} ends at 0x${(recordEnd - 1).toString(16)}, past the last addressable IPS byte 0x${IPS_MAX_OFFSET.toString(16)} (record payload ${String(r.kind === 'literal' ? r.data.length : r.rleLength)} byte(s)); use the BPS format for offsets above 0xFFFFFE`,
+      );
+    }
     out[cursor++] = (r.offset >>> 16) & 0xff;
     out[cursor++] = (r.offset >>> 8) & 0xff;
     out[cursor++] = r.offset & 0xff;

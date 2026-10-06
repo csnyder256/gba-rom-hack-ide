@@ -186,4 +186,98 @@ describe('generatePatch', () => {
     expect(restored.length).toBe(32);
     expect(restored.equals(modified)).toBe(true);
   });
+
+  // IPS addresses bytes with a 3-byte offset, so the last position it can
+  // describe is 0xFFFFFE - a 16 MiB (0x1000000-byte) ROM's final byte is
+  // already out of reach. A record's offset field only names where the
+  // record STARTS, so a change beginning just below the ceiling used to
+  // produce a patch whose trailing bytes landed outside the format's
+  // address space: it applied cleanly and silently left those edits out
+  // of the rebuilt ROM. The exporter must refuse instead, and the BPS
+  // path must still carry the same change.
+  const IPS_CEILING_ROM_BYTES = 0x1000000; // 16 MiB
+
+  it('refuses an IPS export when edits reach past the 24-bit offset ceiling', async () => {
+    const base = Buffer.alloc(IPS_CEILING_ROM_BYTES, 0x00);
+    const modified = Buffer.from(base);
+    // Two bytes inside the addressable window, two past it.
+    modified[0xfffffc] = 0xaa;
+    modified[0xfffffd] = 0xab;
+    modified[0xfffffe] = 0xac;
+    modified[0xffffff] = 0xad;
+    writeFileSync(path.join(projectRoot, 'base.gba'), base);
+    writeFileSync(path.join(projectRoot, 'mod.gba'), modified);
+
+    await expect(
+      generatePatch({
+        projectRoot,
+        baseRomPath: 'base.gba',
+        modifiedRomPath: 'mod.gba',
+        outputPath: 'ceiling.ips',
+      }),
+    ).rejects.toMatchObject({ code: 'patch_exceeds_ips_format' });
+
+    // The refusal must not leave a half-written patch behind.
+    expect(existsSync(path.join(projectRoot, 'ceiling.ips'))).toBe(false);
+
+    // BPS is the documented escape hatch and must carry the same edit.
+    const bps = await generatePatch({
+      projectRoot,
+      baseRomPath: 'base.gba',
+      modifiedRomPath: 'mod.gba',
+      outputPath: 'ceiling.bps',
+      patchFormat: 'bps',
+    });
+    expect(bps.patchFormat).toBe('bps');
+    const restored = Buffer.from(
+      enginePatch.applyBps(
+        new Uint8Array(base),
+        new Uint8Array(readFileSync(path.join(projectRoot, 'ceiling.bps'))),
+      ),
+    );
+    expect(restored.length).toBe(IPS_CEILING_ROM_BYTES);
+    expect(restored.equals(modified)).toBe(true);
+  });
+
+  it('refuses an IPS export when a growing patch appends past the ceiling', async () => {
+    const base = Buffer.alloc(IPS_CEILING_ROM_BYTES, 0x11);
+    const modified = Buffer.alloc(IPS_CEILING_ROM_BYTES + 32, 0x11);
+    for (let i = 0; i < 32; i++) modified[IPS_CEILING_ROM_BYTES + i] = 0xee;
+    writeFileSync(path.join(projectRoot, 'base.gba'), base);
+    writeFileSync(path.join(projectRoot, 'mod.gba'), modified);
+
+    await expect(
+      generatePatch({
+        projectRoot,
+        baseRomPath: 'base.gba',
+        modifiedRomPath: 'mod.gba',
+        outputPath: 'grow.ips',
+      }),
+    ).rejects.toMatchObject({ code: 'patch_exceeds_ips_format' });
+  });
+
+  it('keeps exporting IPS normally for a ROM whose last byte is addressable', async () => {
+    // 0xFFFFFE + 1 bytes = the largest fully representable ROM.
+    const base = Buffer.alloc(0xffffff, 0x00);
+    const modified = Buffer.from(base);
+    modified[0xfffffe] = 0xff; // the final addressable byte
+    writeFileSync(path.join(projectRoot, 'base.gba'), base);
+    writeFileSync(path.join(projectRoot, 'mod.gba'), modified);
+
+    const r = await generatePatch({
+      projectRoot,
+      baseRomPath: 'base.gba',
+      modifiedRomPath: 'mod.gba',
+      outputPath: 'edge.ips',
+    });
+    expect(r.patchFormat).toBe('ips');
+    expect(r.recordCount).toBe(1);
+    const restored = Buffer.from(
+      enginePatch.applyIps(
+        base,
+        enginePatch.decodeIps(readFileSync(path.join(projectRoot, 'edge.ips'))),
+      ),
+    );
+    expect(restored.equals(modified)).toBe(true);
+  });
 });
