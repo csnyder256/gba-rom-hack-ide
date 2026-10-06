@@ -187,3 +187,36 @@ describe('applyIps', () => {
     expect(out[24]).toBe(0xcc); // untouched
   });
 });
+
+describe('encodeIps - record ends past the addressable ceiling', () => {
+  it('rejects a literal record whose payload runs past IPS_MAX_OFFSET', () => {
+    // Offset is legal (below the ceiling) but the record's bytes are not:
+    // 0xFFFFFD..0x1000000 are past the last byte IPS can name.
+    expect(() =>
+      encodeIps([
+        {
+          kind: 'literal',
+          offset: IPS_MAX_OFFSET - 1,
+          data: new Uint8Array([1, 2, 3, 4]),
+        },
+      ]),
+    ).toThrow(IpsFormatError);
+  });
+
+  it('rejects an RLE record whose expansion runs past IPS_MAX_OFFSET', () => {
+    expect(() =>
+      encodeIps([
+        { kind: 'rle', offset: IPS_MAX_OFFSET - 1, rleLength: 16, byte: 0xaa },
+      ]),
+    ).toThrow(/past the last addressable IPS byte/);
+  });
+
+  it('accepts a record that ends exactly on the last addressable byte', () => {
+    const bytes = encodeIps([
+      { kind: 'literal', offset: IPS_MAX_OFFSET - 1, data: new Uint8Array([1, 2]) },
+    ]);
+    const decoded = decodeIps(bytes);
+    expect(decoded.length).toBe(1);
+    expect(decoded[0]?.offset).toBe(IPS_MAX_OFFSET - 1);
+  });
+});

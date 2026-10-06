@@ -13,7 +13,12 @@ export {
   type IpsRecord,
 } from './ips.js';
 
-export { produceIpsRecords, type ProduceIpsRecordsOptions } from './diff.js';
+export {
+  produceIpsRecords,
+  produceIpsRecordsWithReport,
+  type IpsDiffReport,
+  type ProduceIpsRecordsOptions,
+} from './diff.js';
 
 export {
   BPS_ACTION_SOURCE_COPY,

@@ -117,7 +117,19 @@ export async function generatePatch(
   if (patchFormat === 'ips') {
     let records: readonly enginePatch.IpsRecord[];
     try {
-      records = enginePatch.produceIpsRecords(base, modified);
+      const report = enginePatch.produceIpsRecordsWithReport(base, modified);
+      // Bytes at or past IPS_MAX_OFFSET + 1 differ but have nowhere to
+      // live: a 3-byte offset cannot reach them. Letting the patch out
+      // anyway would ship a file that applies cleanly and silently
+      // leaves those edits out of the rebuilt ROM, so refuse it and
+      // point at the format that can carry them.
+      if (report.unrepresentableBytes > 0) {
+        const first = report.unrepresentableRanges[0]!;
+        throw new enginePatch.IpsFormatError(
+          `${String(report.unrepresentableBytes)} differing byte(s) sit past the last addressable IPS offset 0x${enginePatch.IPS_MAX_OFFSET.toString(16)} (first at 0x${first[0].toString(16)}) and cannot be represented`,
+        );
+      }
+      records = report.records;
       patchBytes = enginePatch.encodeIps(records);
     } catch (e) {
       if (e instanceof enginePatch.IpsFormatError) {
