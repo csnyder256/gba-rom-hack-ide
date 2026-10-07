@@ -42,8 +42,14 @@ export const STRING_TERMINATOR = 0xff;
  * narrow range (digits + A-Z + a-z + a handful of punct) to cover the
  * full ~256-byte Gen-3 charset documented in
  * pret/pokefirered's `charmap.txt` + pret/pokeemerald's. Adds:
- *  - Accented vowels (0x01..0x35): À Á Â Ç È É Ê Ë Ì Î Ï Ò Ó Ô Œ Ù Ú Û Ñ ß
- *    and their lowercase counterparts.
+ *  - Accented vowels: uppercase 0x01..0x15 (À Á Â Ç È É Ê Ë Ì Î Ï Ò Ó Ô Œ
+ *    Ù Ú Û Ñ ß) and lowercase 0x16..0x29 (à á ç è é ê ë ì î ï ò ó ô œ ù ú
+ *    û ñ), then the ordinals º ª at 0x2A..0x2B. 0x0A, 0x18 and 0x1F are
+ *    gaps in the authoritative charmap and stay unmapped.
+ *
+ * Every byte in this table was cross-checked against the pret charmap
+ * (both `pokefirered` and `pokeemerald` agree byte-for-byte). A byte the
+ * charmap does not define decodes to '?' so a misaligned read is obvious.
  *  - Symbols (0xA0..0xAF + 0xB5..0xBA): · ♂ ♀ ¥ × / and friends.
  *  - Localization variants for European releases (Ä Ö Ü ä ö ü) at
  *    0xF1..0xF6.
@@ -81,30 +87,34 @@ const TABLE: Readonly<Record<number, string>> = (() => {
   t[0x13] = 'Û';
   t[0x14] = 'Ñ';
   t[0x15] = 'ß';
-  // Accented lowercase vowels (0x16..0x2A)
+  // Accented lowercase vowels (0x16..0x29) + ordinals (0x2A..0x2B).
+  // 0x18 and 0x1F are gaps in the charmap, exactly like the uppercase
+  // block's 0x0A - a byte in a gap decodes to '?', and no character is
+  // assigned to a byte the charmap does not name.
   t[0x16] = 'à';
   t[0x17] = 'á';
-  t[0x1a] = 'ç';
-  t[0x1b] = 'è';
-  t[0x1c] = 'é';
-  t[0x1d] = 'ê';
-  t[0x1e] = 'ë';
-  t[0x1f] = 'ì';
-  t[0x21] = 'î';
-  t[0x22] = 'ï';
-  t[0x23] = 'ò';
-  t[0x24] = 'ó';
-  t[0x25] = 'ô';
-  t[0x26] = 'œ';
-  t[0x27] = 'ù';
-  t[0x28] = 'ú';
-  t[0x29] = 'û';
-  t[0x2a] = 'ñ';
-  // Ordinal indicators
-  t[0x2b] = 'º';
-  t[0x2c] = 'ª';
-  // Common punctuation in lower ranges
-  t[0x34] = '+';
+  t[0x19] = 'ç';
+  t[0x1a] = 'è';
+  t[0x1b] = 'é';
+  t[0x1c] = 'ê';
+  t[0x1d] = 'ë';
+  t[0x1e] = 'ì';
+  t[0x20] = 'î';
+  t[0x21] = 'ï';
+  t[0x22] = 'ò';
+  t[0x23] = 'ó';
+  t[0x24] = 'ô';
+  t[0x25] = 'œ';
+  t[0x26] = 'ù';
+  t[0x27] = 'ú';
+  t[0x28] = 'û';
+  t[0x29] = 'ñ';
+  t[0x2a] = 'º';
+  t[0x2b] = 'ª';
+  // Common punctuation in the low ranges. '+' is 0x2E; 0x34 is the "Lv"
+  // ligature (a two-glyph level label, not a single character), so it
+  // stays unmapped - mapping it to '+' made every level read as a plus.
+  t[0x2e] = '+';
   // Digits 0–9 at 0xA1..0xAA
   for (let i = 0; i < 10; i++) t[0xa1 + i] = String.fromCharCode('0'.charCodeAt(0) + i);
   // Punctuation cluster
@@ -128,8 +138,9 @@ const TABLE: Readonly<Record<number, string>> = (() => {
   for (let i = 0; i < 26; i++) t[0xbb + i] = String.fromCharCode('A'.charCodeAt(0) + i);
   // Lowercase a–z at 0xD5..0xEE
   for (let i = 0; i < 26; i++) t[0xd5 + i] = String.fromCharCode('a'.charCodeAt(0) + i);
-  // Arrows + European localization variants
-  t[0xef] = '→';
+  // Right-pointing triangle + European localization variants. 0xEF is
+  // the charmap's '▶' (the menu/marker triangle), not a plain arrow.
+  t[0xef] = '▶';
   t[0xf0] = ':';
   t[0xf1] = 'Ä';
   t[0xf2] = 'Ö';
@@ -141,8 +152,11 @@ const TABLE: Readonly<Record<number, string>> = (() => {
   // text stays legible instead of dropping to '?'. A future parameterized
   // parser can consume the argument byte(s) for 0xFC/0xFD; for now we
   // emit a placeholder and the formatter can strip them.
-  t[0xfa] = '\\p'; // {PROMPT_CLEAR}
-  t[0xfb] = '\\l'; // {PROMPT_SCROLL}
+  // 0xFA is `\l` (scroll up window text) and 0xFB is `\p` (new
+  // paragraph) in the charmap; the two were swapped, so a decoded
+  // paragraph break looked like a scroll and vice versa.
+  t[0xfa] = '\\l'; // scroll up window text
+  t[0xfb] = '\\p'; // new paragraph
   t[0xfc] = '{CC}'; // {COLOR/HIGHLIGHT/etc, 2-byte arg follows}
   t[0xfd] = '{VAR}'; // {VARIABLE substitution, 2-byte arg follows}
   t[0xfe] = '\n'; // newline
@@ -269,8 +283,8 @@ export function encodeString(s: string): Uint8Array {
 const PLACEHOLDER_BYTES: Readonly<Record<string, number>> = Object.freeze({
   '{CC}': 0xfc,
   '{VAR}': 0xfd,
-  '\\p': 0xfa,
-  '\\l': 0xfb,
+  '\\l': 0xfa,
+  '\\p': 0xfb,
 });
 
 /** Placeholder keys ordered longest-first so a shorter placeholder can

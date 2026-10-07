@@ -67,7 +67,8 @@ const DIGIT_9 = 0xaa;
 /** Gen-3 codec accented uppercase + lowercase range
  *  (À Á Â Ç È É Ê Ë Ì Î Ï Ò Ó Ô Œ Ù Ú Û Ñ ß à á ç è é ê ë ì î ï ò ó ô œ ù ú û ñ).
  *  Real species names use these - e.g. Unbound 2.1.1.1's "Flabèbè"
- *  encodes `è` as byte 0x1b. */
+ *  encodes `è` as byte 0x1a (the charmap byte for è; the codec's table
+ *  had this block shifted by one until it was corrected). */
 const ACCENT_LO = 0x01;
 const ACCENT_HI = 0x2a;
 /** Gen-3 codec European-localization variant range (Ä Ö Ü ä ö ü). */
