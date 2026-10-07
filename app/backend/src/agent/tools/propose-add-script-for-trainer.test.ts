@@ -147,6 +147,11 @@ describe('proposeAddScriptForTrainer', () => {
     expect(body).not.toBeNull();
     expect(body!.edits).toHaveLength(3);
 
+    // The synthesized trainerbattle command is byte-exact: type 3 is 10
+    // bytes (opcode + type + trainerId + localId + defeat ptr) plus `end`.
+    const tbEdit = (body!.edits as Array<{ kind: string; afterBytes?: string }>)[1]!;
+    expect(tbEdit.afterBytes).toHaveLength(22); // 11 bytes
+
     // Apply the edits to a working copy + decode the synthesized script.
     const working = Buffer.from(buf);
     for (const e of body!.edits as Array<{
@@ -159,9 +164,13 @@ describe('proposeAddScriptForTrainer', () => {
       }
     }
     const decoded = scriptsApi.decodeBinaryScript(working, result.trainerScriptOffset!);
-    expect(decoded.steps.length).toBeGreaterThan(0);
+    // Byte-exact: exactly [start_battle, end] - the decoder lands cleanly
+    // on `end`, with no stray steps from a mis-sized command.
+    expect(decoded.steps.map((s) => s.kind)).toEqual(['start_battle', 'raw']);
     const first = decoded.steps[0]!;
     expect(first.kind).toBe('start_battle');
     expect(first.params['trainerId']).toBe(42);
+    expect(decoded.steps[1]!.params['opcodeName']).toBe('end');
+    expect(decoded.bytesConsumed).toBe(11);
   });
 });
