@@ -365,6 +365,14 @@ export function decodeBinaryScript(
       };
       if (totalBytes >= 3) {
         params.trainerId = readU16LE(bytes, argStart + 1);
+        // Preserve the type-specific argument bytes verbatim (the intro /
+        // defeat / victory speech pointers etc.) so re-encoding this step
+        // writes the original bytes back instead of zero-filling the
+        // pointers. The encoder consumes this as `trainerbattleRemainder`.
+        const remainderEnd = Math.min(argStart + totalBytes, bytes.length);
+        params.trainerbattleRemainder = Array.from(
+          bytes.subarray(argStart + 3, remainderEnd),
+        );
       }
       steps.push({
         index: steps.length,

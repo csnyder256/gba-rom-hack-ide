@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { decodeBinaryScript } from './binary-script-decoder.js';
+import { encodeDecodedSteps } from './binary-script-encoder.js';
+import { getTrainerbattleArgBytes } from './gen3-script-opcodes.js';
 
 // Phase H-RC1 - verify the script bytecode decoder emits typed steps
 // for the most common opcodes + detects the msgbox macro pattern
@@ -188,5 +190,95 @@ describe('decodeBinaryScript - call/goto capture pointer args', () => {
     expect(decoded.steps[0]!.kind).toBe('branch');
     expect(decoded.steps[0]!.params.targetRomPtr).toBe(romPtr(0x3000));
     expect(decoded.steps[0]!.params.targetFileOffset).toBe(0x3000);
+  });
+});
+
+// Ground truth for these expectations: pret/pokefirered
+// asm/macros/event.inc `.macro trainerbattle` AND src/battle_setup.c
+// `BattleSetup_ConfigureTrainerBattle` + its s*BattleParams tables.
+// The old table was off by 2 for every type, which made the decoder land
+// 2 bytes off after any trainerbattle and silently mis-decode the rest of
+// the script (a missed setflag, a phantom nop, etc.).
+describe('decodeBinaryScript - trainerbattle variable-length encoding', () => {
+  it('reports the authoritative per-type byte counts (bytes after the opcode)', () => {
+    const expected: Record<number, number> = {
+      0: 13, // SINGLE
+      1: 17, // CONTINUE_SCRIPT_NO_MUSIC
+      2: 17, // CONTINUE_SCRIPT
+      3: 9, // SINGLE_NO_INTRO_TEXT
+      4: 17, // DOUBLE
+      5: 13, // REMATCH
+      6: 21, // CONTINUE_SCRIPT_DOUBLE
+      7: 17, // REMATCH_DOUBLE
+      8: 21, // CONTINUE_SCRIPT_DOUBLE_NO_MUSIC
+      9: 13, // EARLY_RIVAL
+    };
+    for (const [type, bytes] of Object.entries(expected)) {
+      expect(getTrainerbattleArgBytes(Number(type))).toBe(bytes);
+    }
+    expect(getTrainerbattleArgBytes(10)).toBe(1); // unknown type bails to the type byte
+  });
+
+  it('lands on the next opcode after a type-0 (SINGLE, 13-byte) battle', () => {
+    const rom = makeRom();
+    const start = 0x1000;
+    rom[start + 0] = 0x5c; // trainerbattle
+    rom[start + 1] = 0x00; // TRAINER_BATTLE_SINGLE
+    writeU16(rom, start + 2, 42); // opponent trainer id
+    writeU16(rom, start + 4, 0); // local id
+    writeU32(rom, start + 6, romPtr(0x2000)); // intro speech ptr
+    writeU32(rom, start + 10, romPtr(0x2100)); // defeat speech ptr
+    rom[start + 14] = 0x29; // setflag - the opcode that follows
+    writeU16(rom, start + 15, 0x0123);
+    rom[start + 17] = 0x02; // end
+
+    const decoded = decodeBinaryScript(rom, start);
+    expect(decoded.steps.map((s) => s.kind)).toEqual(['start_battle', 'set_flag', 'raw']);
+    expect(decoded.steps[0]!.params['trainerId']).toBe(42);
+    expect(decoded.steps[1]!.params['flagId']).toBe(0x0123);
+    expect(decoded.steps[2]!.params['opcodeName']).toBe('end');
+    expect(decoded.bytesConsumed).toBe(18);
+  });
+
+  it('lands on the next opcode after a type-3 (NO_INTRO, 9-byte) battle', () => {
+    const rom = makeRom();
+    const start = 0x1000;
+    rom[start + 0] = 0x5c;
+    rom[start + 1] = 0x03; // TRAINER_BATTLE_SINGLE_NO_INTRO_TEXT
+    writeU16(rom, start + 2, 7); // opponent trainer id
+    writeU16(rom, start + 4, 0); // local id
+    writeU32(rom, start + 6, romPtr(0x2200)); // defeat speech ptr
+    rom[start + 10] = 0x29; // setflag
+    writeU16(rom, start + 11, 0x0456);
+    rom[start + 13] = 0x02; // end
+
+    const decoded = decodeBinaryScript(rom, start);
+    expect(decoded.steps.map((s) => s.kind)).toEqual(['start_battle', 'set_flag', 'raw']);
+    expect(decoded.steps[0]!.params['trainerId']).toBe(7);
+    expect(decoded.steps[1]!.params['flagId']).toBe(0x0456);
+    expect(decoded.bytesConsumed).toBe(14);
+  });
+
+  it('round-trips a decoded trainerbattle byte-for-byte (speech pointers preserved)', () => {
+    const rom = makeRom();
+    const start = 0x1000;
+    rom[start + 0] = 0x5c;
+    rom[start + 1] = 0x01; // CONTINUE_SCRIPT_NO_MUSIC (17 bytes after opcode)
+    writeU16(rom, start + 2, 99);
+    writeU16(rom, start + 4, 0);
+    writeU32(rom, start + 6, romPtr(0x2000));
+    writeU32(rom, start + 10, romPtr(0x2100));
+    writeU32(rom, start + 14, romPtr(0x2300));
+    rom[start + 18] = 0x02; // end
+
+    const decoded = decodeBinaryScript(rom, start);
+    const reencoded = encodeDecodedSteps(decoded.steps, {
+      allocate: () => {
+        throw new Error('trainerbattle re-encode must not allocate');
+      },
+    });
+    expect(Array.from(reencoded)).toEqual(
+      Array.from(rom.subarray(start, start + 19)),
+    );
   });
 });

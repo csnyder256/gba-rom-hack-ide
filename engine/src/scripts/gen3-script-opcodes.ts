@@ -153,39 +153,53 @@ export function listGen3OpcodeSpecs(): ReadonlyArray<Gen3OpcodeSpec> {
 }
 
 /**
- * Gen-3 trainerbattle has a variable encoding per its first arg byte
- * (the "battle type"). Returns the FULL byte count consumed by the
- * opcode + its args, including the type byte itself.
+ * Gen-3 `trainerbattle` (opcode 0x5C) has a variable encoding selected by
+ * its first arg byte (the "battle type"). Returns the number of bytes that
+ * FOLLOW the opcode byte - the type byte plus its type-specific arguments -
+ * so a decoder advances `cursor = opcodeOffset + 1 + n`.
  *
- * Source: pret/pokefirered/asm/macros/event.inc `trainerbattle` macro.
+ * Ground truth, verified 2026-10-07 against BOTH halves of the format:
+ *   - the assembler macro `asm/macros/event.inc` `.macro trainerbattle`
+ *   - the runtime reader `src/battle_setup.c`
+ *     `BattleSetup_ConfigureTrainerBattle` and its `s*BattleParams` spec
+ *     tables (`TRAINER_PARAM_LOAD_VAL_{8,16,32}BIT` consume 1/2/4 bytes;
+ *     `TRAINER_PARAM_CLEAR_VAL_*` consume none; the walk stops at
+ *     `TRAINER_PARAM_LOAD_SCRIPT_RET_ADDR`).
+ *
+ * Common prefix: type u8 + opponent u16 + local_id u16 = 5 bytes. Every
+ * further argument is a 4-byte pointer.
+ *   type 0 SINGLE                          : 5 + 2 ptr = 13
+ *   type 1 CONTINUE_SCRIPT_NO_MUSIC        : 5 + 3 ptr = 17
+ *   type 2 CONTINUE_SCRIPT                 : 5 + 3 ptr = 17
+ *   type 3 SINGLE_NO_INTRO_TEXT            : 5 + 1 ptr =  9
+ *   type 4 DOUBLE                          : 5 + 3 ptr = 17
+ *   type 5 REMATCH                         : 5 + 2 ptr = 13
+ *   type 6 CONTINUE_SCRIPT_DOUBLE          : 5 + 4 ptr = 21
+ *   type 7 REMATCH_DOUBLE                  : 5 + 3 ptr = 17
+ *   type 8 CONTINUE_SCRIPT_DOUBLE_NO_MUSIC : 5 + 4 ptr = 21
+ *   type 9 EARLY_RIVAL                     : 5 + 2 ptr = 13
+ *
+ * Unknown types bail to 1 (just the type byte) so the decoder still makes
+ * forward progress instead of walking off into garbage.
  */
 export function getTrainerbattleArgBytes(typeByte: number): number {
-  // type 0: trainer u16, ?u16, ?ptr u32, ?ptr u32   (1 + 14 = 15)
-  // type 1: same shape                              (1 + 14 = 15)
-  // type 2: trainer u16, ?u16, ?ptr, ?ptr, ?ptr     (1 + 18 = 19)
-  // type 3: trainer u16, ?u16, ?ptr                 (1 + 10 = 11)
-  // type 4: trainer u16, ?u16, ?ptr, ?ptr, ?ptr     (1 + 18 = 19)
-  // type 5: trainer u16, ?u16, ?ptr                 (1 + 10 = 11)
-  // type 6: trainer u16, ?u16, ?ptr, ?ptr, ?ptr     (1 + 18 = 19)
-  // type 7: trainer u16, ?u16, ?ptr, ?ptr           (1 + 14 = 15)
-  // type 8: same as 4                               (1 + 18 = 19)
-  // type 9: trainer u16, ?u16, ?ptr                 (1 + 10 = 11)
   switch (typeByte) {
-    case 0:
-    case 1:
-    case 7:
-      return 15;
-    case 2:
-    case 4:
-    case 6:
-    case 8:
-      return 19;
-    case 3:
-    case 5:
-    case 9:
-      return 11;
+    case 0: // TRAINER_BATTLE_SINGLE
+    case 5: // TRAINER_BATTLE_REMATCH
+    case 9: // TRAINER_BATTLE_EARLY_RIVAL
+      return 13;
+    case 1: // TRAINER_BATTLE_CONTINUE_SCRIPT_NO_MUSIC
+    case 2: // TRAINER_BATTLE_CONTINUE_SCRIPT
+    case 4: // TRAINER_BATTLE_DOUBLE
+    case 7: // TRAINER_BATTLE_REMATCH_DOUBLE
+      return 17;
+    case 3: // TRAINER_BATTLE_SINGLE_NO_INTRO_TEXT
+      return 9;
+    case 6: // TRAINER_BATTLE_CONTINUE_SCRIPT_DOUBLE
+    case 8: // TRAINER_BATTLE_CONTINUE_SCRIPT_DOUBLE_NO_MUSIC
+      return 21;
     default:
-      // Unknown type - bail conservatively (1 byte = just the type).
+      // Unknown type - bail conservatively (just the type byte).
       return 1;
   }
 }

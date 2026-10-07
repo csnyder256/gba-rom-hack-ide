@@ -15,17 +15,17 @@
  * `trainerbattle` opcode (0x5C) type 3 (TRAINER_BATTLE_SINGLE_NO_INTRO_TEXT)
  * with the requested trainerId, plus a 2-byte post-battle stub
  * (`release; end`) the trainer-battle handler runs after the player
- * wins. Layout:
+ * wins. Layout (type 3 is 10 bytes per the pret `trainerbattle` macro /
+ * `sOrdinaryNoIntroBattleParams`: type u8 + trainerId u16 + localId u16 +
+ * defeat-speech ptr u32):
  *
- *   ── trainer-battle script (13 bytes) ──
+ *   ── trainer-battle script (11 bytes) ──
  *   +0  u8  0x5C            (trainerbattle opcode)
  *   +1  u8  0x03            (battle type: single, no intro text)
  *   +2  u16 trainerId
- *   +4  u16 unused          (= 0)
+ *   +4  u16 localId         (= 0)
  *   +6  u32 defeatTextPtr   (= postBattlePtr - the script after victory)
- *   +10 u8  gameInProgress  (= 0)
- *   +11 u8  flag            (= 0)
- *   +12 u8  0x02            (end opcode)
+ *   +10 u8  0x02            (end opcode)
  *
  *   ── post-battle stub (2 bytes) ──
  *   +0  u8  0x6C            (release opcode)
@@ -97,7 +97,7 @@ const TRAINERBATTLE_TYPE_NO_INTRO = 0x03;
 const RELEASE_OPCODE = 0x6c;
 const END_OPCODE = 0x02;
 const GBA_ROM_BASE = 0x08000000;
-const TRAINER_BATTLE_SCRIPT_BYTES = 13; // trainerbattle (12) + end (1)
+const TRAINER_BATTLE_SCRIPT_BYTES = 11; // trainerbattle type 3 (10) + end (1)
 const OBJ_EVENT_TRAINER_FIELDS_OFFSET = 0x0c;
 /** Length of the contiguous slice we rewrite on the ObjectEvent struct:
  *  trainerType (2) + sight (2) + scriptPointer (4) = 8 bytes. flagId
@@ -169,7 +169,7 @@ function readStructFileOffset(o: ObjectEvent): number | null {
   return null;
 }
 
-/** Build the 13-byte trainer-battle script that runs when this NPC
+/** Build the 11-byte trainer-battle script that runs when this NPC
  *  sees / is talked to. */
 function buildTrainerBattleScript(trainerId: number, postBattleOffset: number): Uint8Array {
   const out = new Uint8Array(TRAINER_BATTLE_SCRIPT_BYTES);
@@ -177,16 +177,14 @@ function buildTrainerBattleScript(trainerId: number, postBattleOffset: number): 
   out[1] = TRAINERBATTLE_TYPE_NO_INTRO;
   out[2] = trainerId & 0xff;
   out[3] = (trainerId >>> 8) & 0xff;
-  out[4] = 0; // unused u16
+  out[4] = 0; // localId
   out[5] = 0;
   const ptr = (postBattleOffset + GBA_ROM_BASE) >>> 0;
   out[6] = ptr & 0xff;
   out[7] = (ptr >>> 8) & 0xff;
   out[8] = (ptr >>> 16) & 0xff;
   out[9] = (ptr >>> 24) & 0xff;
-  out[10] = 0; // gameInProgress
-  out[11] = 0; // flag
-  out[12] = END_OPCODE;
+  out[10] = END_OPCODE;
   return out;
 }
 
@@ -266,7 +264,7 @@ export async function proposeAddScriptForTrainer(
   }
 
   // 1. Allocate the post-battle stub (2 bytes).
-  // 2. Allocate the trainer-battle script (13 bytes).
+  // 2. Allocate the trainer-battle script (11 bytes).
   const allocator = new InBatchAllocator(rom.bytes);
   const postBattleBytes = buildPostBattleScript();
   const postBattleOffset = allocator.allocate(postBattleBytes.length);

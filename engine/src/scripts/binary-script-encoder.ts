@@ -38,6 +38,7 @@ import {
   MOVEMENT_END_BYTE,
   branchOperatorToConditionByte,
   getGen3OpcodeSpec,
+  getTrainerbattleArgBytes,
   type BranchOperator,
   type Gen3OpcodeSpec,
   type ScriptStepKind,
@@ -292,37 +293,20 @@ function encodeStartBattle(out: number[], step: EncodableStep): void {
   // changes, this is sufficient.
   writeU16LE(out, paramU16(step, 'trainerId', 0));
   // Remaining type-specific bytes preserved from original if present.
+  // The decoder stashes them as `trainerbattleRemainder`, so a decoded
+  // step round-trips byte-for-byte (the intro/defeat/victory pointers are
+  // not zero-filled). When absent we pad to the format's true length using
+  // the single shared source of truth.
   const remainder = step.params['trainerbattleRemainder'];
   if (Array.isArray(remainder)) {
     for (const b of remainder as number[]) writeU8(out, b & 0xff);
   } else {
-    // Fall back: pad with zeros per the type-byte's known argbytes.
-    const total = getTrainerbattleArgBytesLocal(battleType);
-    const remainingArgBytes = total - 3; // already wrote battleType byte + 2 trainerId bytes
+    // Fall back: pad with zeros per the type byte's known arg count.
+    // `getTrainerbattleArgBytes` is the byte count AFTER the opcode, and
+    // we've already written the type byte (1) + trainerId (2).
+    const total = getTrainerbattleArgBytes(battleType);
+    const remainingArgBytes = Math.max(0, total - 3);
     for (let i = 0; i < remainingArgBytes; i++) writeU8(out, 0);
-  }
-}
-
-/** Mirrors getTrainerbattleArgBytes from gen3-script-opcodes.ts. The
- *  exported helper isn't re-imported here to keep this encoder
- *  self-contained for fixture-only tests; the values match. */
-function getTrainerbattleArgBytesLocal(typeByte: number): number {
-  switch (typeByte) {
-    case 0:
-    case 1:
-    case 7:
-      return 15;
-    case 2:
-    case 4:
-    case 6:
-    case 8:
-      return 19;
-    case 3:
-    case 5:
-    case 9:
-      return 11;
-    default:
-      return 1;
   }
 }
 
