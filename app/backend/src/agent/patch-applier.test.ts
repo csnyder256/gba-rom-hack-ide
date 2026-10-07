@@ -291,9 +291,9 @@ describe('applyEdits - binary_replace_text', () => {
     ]);
     expect(result.appliedCount).toBe(1);
     const buf = await fsp.readFile(path.join(root, ROM_NAME));
-    // "HI" then the single \p control byte (0xFA) then "BYE".
+    // "HI" then the single \p control byte (0xFB) then "BYE".
     expect(buf[0x900]).toBe(0xc2); // H
-    expect(buf[0x900 + 2]).toBe(0xfa); // \p
+    expect(buf[0x900 + 2]).toBe(0xfb); // \p
     expect(text.decodeString(buf, 0x900, 16)).toBe('HI\\pBYE');
     // And the write is reversible, control code included.
     await applyEdits(root, [...result.reverseEdits]);

@@ -31,18 +31,52 @@ describe('Gen-3 text codec - decodeByte', () => {
     expect(decodeByte(0xb6)).toBe('♀');
   });
 
-  it('decodes accented letters expanded in G.3', () => {
+  it('decodes accented letters at their authoritative charmap bytes', () => {
+    // Every byte here is the value pret/pokefirered and pret/pokeemerald
+    // agree on. The lowercase block used to be shifted +1 (0x1A held ç
+    // instead of è, and so on), so decoded names read one vowel off.
     expect(decodeByte(0x01)).toBe('À');
-    expect(decodeByte(0x1c)).toBe('é');
     expect(decodeByte(0x14)).toBe('Ñ');
+    expect(decodeByte(0x16)).toBe('à');
+    expect(decodeByte(0x17)).toBe('á');
+    expect(decodeByte(0x19)).toBe('ç');
+    expect(decodeByte(0x1a)).toBe('è');
+    expect(decodeByte(0x1b)).toBe('é');
+    expect(decodeByte(0x1c)).toBe('ê');
+    expect(decodeByte(0x1e)).toBe('ì');
+    expect(decodeByte(0x20)).toBe('î');
+    expect(decodeByte(0x29)).toBe('ñ');
+    expect(decodeByte(0x2a)).toBe('º');
+    expect(decodeByte(0x2b)).toBe('ª');
     expect(decodeByte(0xf1)).toBe('Ä');
     expect(decodeByte(0xf6)).toBe('ü');
   });
 
+  it('leaves the charmap gaps unmapped', () => {
+    // 0x0A (uppercase), 0x18 and 0x1F (lowercase) are holes in the
+    // charmap - no character lives there, so they decode to '?'.
+    expect(decodeByte(0x0a)).toBe('?');
+    expect(decodeByte(0x18)).toBe('?');
+    expect(decodeByte(0x1f)).toBe('?');
+    // 0x2C is SUPER_ER and 0x34 is the "Lv" ligature - neither is a
+    // single character, so neither may decode to one.
+    expect(decodeByte(0x2c)).toBe('?');
+    expect(decodeByte(0x34)).toBe('?');
+  });
+
+  it('decodes the single-byte punctuation at its real byte', () => {
+    expect(decodeByte(0x2e)).toBe('+');
+    // 0xEF is the charmap's right-pointing triangle, not a plain arrow.
+    expect(decodeByte(0xef)).toBe('▶');
+    expect(decodeByte(0xf0)).toBe(':');
+  });
+
   it('decodes control codes as readable placeholders', () => {
     expect(decodeByte(0xfe)).toBe('\n');
-    expect(decodeByte(0xfa)).toBe('\\p');
-    expect(decodeByte(0xfb)).toBe('\\l');
+    // 0xFA is `\l` (scroll) and 0xFB is `\p` (paragraph); the charmap
+    // defines them in that order and the table used to have them swapped.
+    expect(decodeByte(0xfa)).toBe('\\l');
+    expect(decodeByte(0xfb)).toBe('\\p');
     expect(decodeByte(0xfc)).toBe('{CC}');
     expect(decodeByte(0xfd)).toBe('{VAR}');
   });
@@ -130,8 +164,8 @@ describe('Gen-3 text codec - encodeString', () => {
     // straight into a dialogue box, so the encoder has to accept exactly
     // what the decoder produces. Before this, `{` and `\` had no mapping
     // and every write of a string carrying a control code threw.
-    expect(Array.from(encodeString('\\p'))).toEqual([0xfa]);
-    expect(Array.from(encodeString('\\l'))).toEqual([0xfb]);
+    expect(Array.from(encodeString('\\p'))).toEqual([0xfb]);
+    expect(Array.from(encodeString('\\l'))).toEqual([0xfa]);
     expect(Array.from(encodeString('{CC}'))).toEqual([0xfc]);
     expect(Array.from(encodeString('{VAR}'))).toEqual([0xfd]);
   });
@@ -143,7 +177,7 @@ describe('Gen-3 text codec - encodeString', () => {
     expect(enc[6]).toBe(0xfe); // newline
     // The \p sits in the middle, right before "Enjoy!" - find it and check
     // that exactly one byte stands in for the two-glyph placeholder.
-    const markerIdx = Array.from(enc).indexOf(0xfa);
+    const markerIdx = Array.from(enc).indexOf(0xfb);
     expect(markerIdx).toBeGreaterThan(0);
     expect(decodeString(enc, markerIdx + 1, 6)).toBe('Enjoy!');
     expect(decodeString(enc, 0, enc.length)).toBe(line);
