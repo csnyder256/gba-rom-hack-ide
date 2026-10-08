@@ -112,6 +112,17 @@ const DIM_MAX = 16;
  *  positives that this looser bound would otherwise admit. */
 const DIM_MAX_U8 = 255;
 
+/** Public re-exports of the per-layout field bounds. The region-map
+ *  ENCODER (`maps/region-map-sections-writer.ts`) validates against
+ *  these so it only ever emits entries `tryParseEntry12`/`tryParseEntry8`
+ *  will accept - a writer that emits bytes the parser rejects is a
+ *  silent corruption of the section table (the entry vanishes from the
+ *  scanned table, and for the 12-byte layout a stray name-pointer byte
+ *  in the padding field can invalidate the whole run). */
+export const REGION_MAP_SECTION_COORD_MIN_S16 = COORD_MIN_S16;
+export const REGION_MAP_SECTION_COORD_MAX_S16 = COORD_MAX_S16;
+export const REGION_MAP_SECTION_DIM_MAX_12 = DIM_MAX;
+
 /** GBA ROM mirror range - name pointers must fall here OR be 0. */
 const GBA_ROM_BASE = 0x08000000;
 const GBA_ROM_END_EXCLUSIVE = 0x0a000000;

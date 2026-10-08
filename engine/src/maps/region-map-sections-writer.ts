@@ -22,6 +22,9 @@
 
 import { GBA_ROM_BASE_ADDRESS } from '../pointers/index.js';
 import {
+  REGION_MAP_SECTION_COORD_MAX_S16,
+  REGION_MAP_SECTION_COORD_MIN_S16,
+  REGION_MAP_SECTION_DIM_MAX_12,
   REGION_MAP_SECTION_SIZE_BYTES_12,
   REGION_MAP_SECTION_SIZE_BYTES_8,
   type RegionMapLayoutKind,
@@ -47,47 +50,61 @@ export class RegionMapSectionEncodeError extends Error {
   }
 }
 
-/** Encode a single region-map entry. Layout depends on the family. */
+/**
+ * Encode a single region-map entry. Layout depends on the family, and
+ * MUST mirror the scanner's `tryParseEntry12` / `tryParseEntry8`
+ * exactly - this encoder is the inverse of that parser, so a field at
+ * the wrong offset would be silently misread (or, for the 12-byte
+ * layout, put a name-pointer byte into the padding field and make the
+ * parser reject the entry entirely).
+ *
+ *   12-byte (Emerald-style), mirrors `tryParseEntry12`:
+ *     0x00 s16 x
+ *     0x02 s16 y
+ *     0x04 u8  width
+ *     0x05 u8  height
+ *     0x06 u16 padding (always 0 - the parser requires it)
+ *     0x08 u32 name pointer (or 0)
+ *
+ *   8-byte (FRLG-style), mirrors `tryParseEntry8`:
+ *     0x00 u8  x
+ *     0x01 u8  y
+ *     0x02 u8  width
+ *     0x03 u8  height
+ *     0x04 u32 name pointer (or 0)
+ */
 export function encodeRegionMapSection(
   spec: RegionMapSectionSpec,
   layoutKind: RegionMapLayoutKind,
 ): Uint8Array {
-  validateU8('x', spec.x);
-  validateU8('y', spec.y);
-  validateU8('width', spec.width);
-  validateU8('height', spec.height);
   const size =
     layoutKind === '12byte' ? REGION_MAP_SECTION_SIZE_BYTES_12 : REGION_MAP_SECTION_SIZE_BYTES_8;
   const out = new Uint8Array(size);
   if (layoutKind === '12byte') {
-    // Emerald-style 12-byte layout:
-    //   0x00 u8 x
-    //   0x01 u8 y
-    //   0x02 u8 width
-    //   0x03 u8 height
-    //   0x04 u32 namePointer
-    //   0x08 u32 padding (typically 0)
+    // s16 x/y: the parser accepts only [COORD_MIN_S16, COORD_MAX_S16].
+    validateRange('x', spec.x, REGION_MAP_SECTION_COORD_MIN_S16, REGION_MAP_SECTION_COORD_MAX_S16);
+    validateRange('y', spec.y, REGION_MAP_SECTION_COORD_MIN_S16, REGION_MAP_SECTION_COORD_MAX_S16);
+    // width/height are u8 but the parser bounds them at DIM_MAX_12.
+    validateRange('width', spec.width, 0, REGION_MAP_SECTION_DIM_MAX_12);
+    validateRange('height', spec.height, 0, REGION_MAP_SECTION_DIM_MAX_12);
+    writeS16LE(out, 0x00, spec.x);
+    writeS16LE(out, 0x02, spec.y);
+    out[0x04] = spec.width & 0xff;
+    out[0x05] = spec.height & 0xff;
+    out[0x06] = 0; // padding - parser rejects a non-zero value here
+    out[0x07] = 0;
+    writeNamePointer(out, 0x08, spec.nameOffset);
+  } else {
+    // 8-byte FRLG layout - all four coord/size fields are full-range u8.
+    validateU8('x', spec.x);
+    validateU8('y', spec.y);
+    validateU8('width', spec.width);
+    validateU8('height', spec.height);
     out[0x00] = spec.x & 0xff;
     out[0x01] = spec.y & 0xff;
     out[0x02] = spec.width & 0xff;
     out[0x03] = spec.height & 0xff;
     writeNamePointer(out, 0x04, spec.nameOffset);
-    out[0x08] = 0;
-    out[0x09] = 0;
-    out[0x0a] = 0;
-    out[0x0b] = 0;
-  } else {
-    // FRLG-style 8-byte layout:
-    //   0x00 u32 namePointer
-    //   0x04 u8 x
-    //   0x05 u8 y
-    //   0x06 u8 width
-    //   0x07 u8 height
-    writeNamePointer(out, 0x00, spec.nameOffset);
-    out[0x04] = spec.x & 0xff;
-    out[0x05] = spec.y & 0xff;
-    out[0x06] = spec.width & 0xff;
-    out[0x07] = spec.height & 0xff;
   }
   return out;
 }
@@ -117,6 +134,21 @@ function validateU8(field: string, v: number): void {
   if (!Number.isInteger(v) || v < 0 || v > 0xff) {
     throw new RegionMapSectionEncodeError(field, `must be u8; got ${String(v)}`);
   }
+}
+
+function validateRange(field: string, v: number, min: number, max: number): void {
+  if (!Number.isInteger(v) || v < min || v > max) {
+    throw new RegionMapSectionEncodeError(
+      field,
+      `must be an integer in [${String(min)}, ${String(max)}] (the scanner would reject anything else); got ${String(v)}`,
+    );
+  }
+}
+
+function writeS16LE(out: Uint8Array, byteOffset: number, value: number): void {
+  const u = value & 0xffff;
+  out[byteOffset + 0] = u & 0xff;
+  out[byteOffset + 1] = (u >>> 8) & 0xff;
 }
 
 /**
