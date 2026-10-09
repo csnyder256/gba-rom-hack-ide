@@ -88,7 +88,7 @@ describe('emulator/heap-readers', () => {
 
     it('resolves offsets WITHIN a region', () => {
       expect(findRegionForAddr(0x08000100)?.name).toBe('rom');
-      expect(findRegionForAddr(0x02024084)?.name).toBe('ewram'); // FRLG gBattleMons
+      expect(findRegionForAddr(0x02023be4)?.name).toBe('ewram'); // FRLG gBattleMons
     });
 
     it('returns null for unmapped addresses', () => {
