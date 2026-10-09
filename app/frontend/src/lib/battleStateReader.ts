@@ -9,7 +9,9 @@
  * **What it reads.** Vanilla pret/pokefirered exposes:
  *
  *   `gBattleMons[2]` - the active player + opponent battle structs.
- *   Each is `struct BattleMon` (88 bytes / 0x58) with the layout:
+ *   Each is `struct BattlePokemon` (88 bytes / 0x58) with the layout
+ *   (pret/pokefirered + pret/pokeemerald `include/pokemon.h`, identical
+ *   in both):
  *     +0x00  species   u16
  *     +0x02  attack    u16
  *     +0x04  defense   u16
@@ -17,22 +19,31 @@
  *     +0x08  spAttack  u16
  *     +0x0A  spDefense u16
  *     +0x0C  moves[4]  u16 ×4
- *     +0x14  hpIV / atkIV / etc. (packed)
- *     +0x18  abilityId u8
- *     +0x19  type1 / type2 / type3  u8 ×3
- *     +0x1C  pp[4]    u8 ×4
- *     +0x20  hpEV / atkEV / etc.
- *     +0x24  status   u32 (bitfield: SLP=0..7, PSN=3, BRN=4, FRZ=5, PAR=6)
- *     +0x28  level    u8
- *     +0x29  friendship u8
- *     +0x2A  maxHp   u16   (← we read this)
- *     +0x2C  hp      u16   (← and this)
- *     +0x2E  nickname (variable trailing bytes)
- *     ...
+ *     +0x14  IV bitfield u32 (hp/atk/def/spd/spAtk/spDef IVs, isEgg, abilityNum)
+ *     +0x18  statStages[8] s8
+ *     +0x20  ability   u8
+ *     +0x21  type1     u8
+ *     +0x22  type2     u8
+ *     +0x23  unknown   u8    (vanilla leaves this unused; CFRU/DPE use type3)
+ *     +0x24  pp[4]     u8 ×4
+ *     +0x28  hp        u16   (← we read this)
+ *     +0x2A  level     u8    (← and this)
+ *     +0x2B  friendship u8
+ *     +0x2C  maxHP     u16   (← and this)
+ *     +0x2E  item      u16
+ *     +0x30  nickname[11]
+ *     +0x3B  ppBonuses u8
+ *     +0x3C  otName[8]
+ *     +0x44  experience u32
+ *     +0x48  personality u32
+ *     +0x4C  status1   u32   (← and this; SLP=0..7, PSN=3, BRN=4, FRZ=5, PAR=6)
+ *     +0x50  status2   u32
+ *     +0x54  otId      u32
  *
- *   Vanilla FRLG keeps `gBattleMons` at EWRAM 0x02024084 (= offset
- *   0x4084 inside the 256 KB EWRAM region). CFRU sometimes relocates
- *   the table by a few cells but the layout is identical.
+ *   Vanilla FRLG keeps `gBattleMons` at EWRAM 0x02023BE4 (pret/pokefirered
+ *   `symbols/pokefirered.sym`: `02023be4 g 00000160 gBattleMons`, i.e. four
+ *   0x58 structs = 0x160 bytes). CFRU sometimes relocates the table but the
+ *   layout is identical.
  *
  * **What it does NOT do.** We don't try to detect whether a battle
  * is actually in progress (vs garbage left over from a prior battle).
@@ -48,24 +59,32 @@
 import { EmulatorMemory, gbaAddressToRegion } from './emulatorMemory';
 import type { EmulatorMemoryHost } from './emulatorMemory';
 
-/** Vanilla FRLG-USA gBattleMons[0] address (player monster). */
-export const FRLG_VANILLA_GBATTLEMONS_ADDR = 0x02024084;
+/** Vanilla FRLG-USA gBattleMons[0] address (player monster).
+ *  Source: pret/pokefirered `symbols/pokefirered.sym`
+ *  (`02023be4 g 00000160 gBattleMons`). */
+export const FRLG_VANILLA_GBATTLEMONS_ADDR = 0x02023be4;
 
-/** sizeof(struct BattleMon) in vanilla FRLG = 88 bytes. */
+/** sizeof(struct BattlePokemon) = 0x58 = 88 bytes. */
 export const BATTLEMON_STRUCT_SIZE = 88;
 
-/** Offsets within `struct BattleMon` (relative to the struct's start). */
+/** Offsets within `struct BattlePokemon` (relative to the struct's start).
+ *  Ground truth: pret/pokefirered + pret/pokeemerald `include/pokemon.h`
+ *  `struct BattlePokemon`. Every value is the field's real byte offset in
+ *  that struct; the earlier table was shifted (ability read from the
+ *  stat-stage array) and transposed (hp/maxHP swapped, status read from the
+ *  pp array), so a live battle produced garbage HP bars and a level the
+ *  sanity check rejected - the HUD stayed on "waiting for an active battle". */
 export const BATTLEMON_OFFSETS = {
   species: 0x00, // u16
   moves: 0x0c, // u16 ×4
-  abilityId: 0x18, // u8
-  type1: 0x19, // u8
-  type2: 0x1a, // u8
-  type3: 0x1b, // u8 (CFRU+; vanilla doesn't use this)
-  status: 0x24, // u32
-  level: 0x28, // u8
-  maxHp: 0x2a, // u16
-  hp: 0x2c, // u16
+  abilityId: 0x20, // u8
+  type1: 0x21, // u8
+  type2: 0x22, // u8
+  type3: 0x23, // u8 (vanilla FRLG leaves this byte unused; CFRU/DPE use type3)
+  hp: 0x28, // u16
+  level: 0x2a, // u8
+  maxHp: 0x2c, // u16
+  status: 0x4c, // u32 status1
 } as const;
 
 /** Per-monster snapshot returned to the HUD overlay. All numeric
