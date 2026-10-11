@@ -148,6 +148,28 @@ const TABLE: Readonly<Record<number, string>> = (() => {
   t[0xfe] = '\n'; // newline
   // 0xFF intentionally NOT mapped - it's the terminator (handled separately
   // in decodeString).
+  //
+  // Remaining single-byte entries the pret charmap defines in its standard
+  // section but the table above did not yet carry. Without them the decoder
+  // renders a real character as '?' and the encoder THROWS on it, so any
+  // write path that round-trips text (item descriptions, Pokédex flavor,
+  // renaming, `binary_replace_text`) breaks the moment a string contains one:
+  // a parenthesised aside, "50%", "A & B", "TRAINER<->ITEM", or the Spanish
+  // "¿"/"¡". Each byte below was cross-checked against pret/pokefirered's
+  // charmap.txt (pokefirered + pokeemerald agree byte-for-byte).
+  t[0x2d] = '&';
+  t[0x35] = '=';
+  t[0x36] = ';';
+  t[0x51] = '¿';
+  t[0x52] = '¡';
+  t[0x5a] = 'Í';
+  t[0x5b] = '%';
+  t[0x5c] = '(';
+  t[0x5d] = ')';
+  t[0x68] = 'â';
+  t[0x6f] = 'í';
+  t[0x85] = '<';
+  t[0x86] = '>';
   return t;
 })();
 
@@ -289,5 +311,12 @@ const REVERSE_TABLE: Readonly<Record<string, number>> = (() => {
   for (const [byteStr, ch] of Object.entries(TABLE)) {
     if (r[ch] === undefined) r[ch] = Number.parseInt(byteStr, 10);
   }
+  // The charmap names byte 0xB4 twice - `'’' = B4` and `'\'' = B4` - because
+  // the in-game apostrophe is stored as one byte that may be written either
+  // way. TABLE decodes 0xB4 to '’', so register the plain ASCII apostrophe
+  // as an encode-only alias for the same byte; otherwise a caller writing
+  // "FARFETCH'D" or "It's" would hit the "Cannot encode" throw below even
+  // though the charmap sanctions the character.
+  if (r["'"] === undefined) r["'"] = 0xb4;
   return r;
 })();
