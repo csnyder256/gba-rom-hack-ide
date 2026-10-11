@@ -207,3 +207,60 @@ describe('Gen-3 text codec - STRING_TERMINATOR constant', () => {
     expect(STRING_TERMINATOR).toBe(0xff);
   });
 });
+
+describe('Gen-3 text codec - full charmap coverage', () => {
+  // Every byte here is defined by pret/pokefirered's charmap.txt (standard
+  // section; pret/pokeemerald agrees byte-for-byte). The table used to omit
+  // them, so each decoded to the lossy '?' placeholder AND `encodeString`
+  // threw on the character - any write path that round-trips a real string
+  // containing one of them (item text, Pokedex flavor, rename, binary text
+  // replace) failed outright.
+  const EXTRA: ReadonlyArray<readonly [number, string]> = [
+    [0x2d, '&'],
+    [0x35, '='],
+    [0x36, ';'],
+    [0x51, '¿'],
+    [0x52, '¡'],
+    [0x5a, 'Í'],
+    [0x5b, '%'],
+    [0x5c, '('],
+    [0x5d, ')'],
+    [0x68, 'â'],
+    [0x6f, 'í'],
+    [0x85, '<'],
+    [0x86, '>'],
+  ];
+
+  it('decodes each charmap byte that used to collapse to a placeholder', () => {
+    for (const [byte, ch] of EXTRA) {
+      expect(decodeByte(byte)).toBe(ch);
+    }
+  });
+
+  it('decodes a realistic string containing the newly-mapped characters', () => {
+    // "PROF. OAK (50%) <A & B>" - every byte in the run is a real character.
+    const bytes = new Uint8Array([
+      0xca, 0xcc, 0xc9, 0xc0, 0xad, 0x00, 0xc9, 0xbb, 0xc5, 0x00, 0x5c, 0xa6,
+      0xa1, 0x5b, 0x5d, 0x00, 0x85, 0xbb, 0x00, 0x2d, 0x00, 0xbc, 0x86,
+    ]);
+    expect(decodeString(bytes, 0, bytes.length)).toBe('PROF. OAK (50%) <A & B>');
+  });
+
+  it('encodes those characters instead of throwing', () => {
+    for (const [byte, ch] of EXTRA) {
+      expect(Array.from(encodeString(ch))).toEqual([byte]);
+    }
+    const roundTrip = 'A (50%) & B <x>; ¿Y? ¡Sí! Í â í';
+    expect(decodeString(encodeString(roundTrip), 0, 64)).toBe(roundTrip);
+  });
+
+  it('accepts the ASCII apostrophe as an alias for the 0xB4 apostrophe byte', () => {
+    // charmap.txt names 0xB4 twice - as the curly apostrophe and as the plain
+    // ASCII apostrophe - because the in-game apostrophe is one byte written
+    // either way. The decoder emits the curly form; the encoder must accept
+    // the ASCII form too, or "FARFETCH'D" cannot be written.
+    expect(Array.from(encodeString("'"))).toEqual([0xb4]);
+    expect(Array.from(encodeString('’'))).toEqual([0xb4]);
+    expect(decodeString(encodeString("FARFETCH'D"), 0, 16)).toBe('FARFETCH’D');
+  });
+});
