@@ -18,6 +18,8 @@ export {
   type ScanBaseStatsOptions,
 } from './base-stats-scanner.js';
 
+export { isRealTableBoundary } from './table-boundary.js';
+
 export {
   EVOLUTION_BLOCK_SIZE_BYTES,
   EVOLUTION_METHOD_MAX,

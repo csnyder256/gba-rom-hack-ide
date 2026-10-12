@@ -115,6 +115,48 @@ describe('scanEvolutionTable - happy paths', () => {
       expect(r.blocks[0]?.populatedSlots[0]?.targetSpecies).toBe(50);
     }
   });
+
+  it('re-attaches the leading SPECIES_NONE (species 0) block at a real table boundary', () => {
+    // Vanilla layout: species 0 is an all-zero (no-evolution) block,
+    // species 1.. are populated. The anchor lands on species 1; the
+    // scanner must re-attach the preceding species-0 block so
+    // blocks[i] == species i. A non-zero byte just before the table
+    // marks a real table boundary (vs incidental zero-fill).
+    const buf = Buffer.alloc(0x2000);
+    const tableAt = 0x100;
+    buf.writeUInt8(0xaa, tableAt - 1); // preceding ROM data
+    for (let i = 1; i <= 8; i++) {
+      plantBlock(buf, tableAt + i * BLOCK, [
+        { method: 4, param: 16, targetSpecies: i + 1 },
+      ]);
+    }
+    const r = scanEvolutionTable(buf);
+    expect(r).not.toBeNull();
+    if (r !== null) {
+      expect(r.tableStart).toBe(tableAt); // species 0's offset, not tableAt + BLOCK
+      expect(r.blocks[0]?.populatedSlots).toEqual([]); // species 0 = no evolutions
+      expect(r.blocks[1]?.populatedSlots[0]?.targetSpecies).toBe(2); // species 1 → 2
+      expect(r.populatedBlockCount).toBe(8);
+    }
+  });
+
+  it('does NOT re-attach a leading empty block when it sits in incidental zero-fill', () => {
+    // Same as above but the block before the anchor is zero-fill (no
+    // real boundary) - it is padding, not a species-0 slot.
+    const buf = Buffer.alloc(0x2000);
+    const tableAt = 0x100;
+    for (let i = 1; i <= 8; i++) {
+      plantBlock(buf, tableAt + i * BLOCK, [
+        { method: 4, param: 16, targetSpecies: i + 1 },
+      ]);
+    }
+    const r = scanEvolutionTable(buf);
+    expect(r).not.toBeNull();
+    if (r !== null) {
+      expect(r.tableStart).toBe(tableAt + BLOCK);
+      expect(r.blocks[0]?.populatedSlots[0]?.targetSpecies).toBe(2);
+    }
+  });
 });
 
 describe('scanEvolutionTable - rejection cases', () => {

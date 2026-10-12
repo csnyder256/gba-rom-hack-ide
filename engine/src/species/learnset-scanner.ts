@@ -26,9 +26,10 @@
  * defeats zero-fill matching: in zero-fill regions every u32 = 0
  * (not a valid pointer) so we never anchor in zero-fill at all.
  * The anchor still admits the vanilla case where `gLevelUpLearnsets
- * [SPECIES_NONE]` points at `{0xFFFF}` (empty) - but only off-by-
- * one (we anchor at species 1 = Bulbasaur, which is always
- * non-empty in vanilla). Symmetric trade-off with P8-T4 evolutions.
+ * [SPECIES_NONE]` points at `{0xFFFF}` (empty) - the scan then anchors
+ * at species 1 = Bulbasaur (always non-empty in vanilla). The leading
+ * species-0 slot is re-attached afterwards (see the recovery step in
+ * `scanLearnsetPointerTable`) so `entries[i]` == species `i`.
  *
  * Performance: ~100 ms on a 16 MiB ROM (4-byte-stride scan with
  * cheap fast-reject at the "is u32 a ROM pointer" check).
@@ -43,6 +44,7 @@ import {
   parseLearnsetArray,
   type Learnset,
 } from './learnset.js';
+import { isRealTableBoundary } from './table-boundary.js';
 
 /** Minimum pointers required to accept a run as gLevelUpLearnsets.
  *  Vanilla has 411; even hyper-stripped test ROMs clear 8. */
@@ -70,7 +72,7 @@ export interface LearnsetPointerTable {
   /** Number of valid pointer/learnset pairs. */
   readonly pointerCount: number;
   /** Each parsed (pointer, learnset) pair, in table order. Index
-   *  = species id (with the off-by-one caveat documented above). */
+   *  = species id (the leading empty SPECIES_NONE slot is included). */
   readonly entries: ReadonlyArray<LearnsetTableEntry>;
   /** Count of entries whose learnset has ≥1 non-terminator entry. */
   readonly populatedEntryCount: number;
@@ -110,13 +112,45 @@ export function scanLearnsetPointerTable(
     if (!firstParse.ok) continue;
     if (firstParse.learnset.entries.length === 0) continue; // empty learnset = poor anchor
 
-    const entries: LearnsetTableEntry[] = [
-      {
-        pointerFileOffset: candidateStart,
-        pointerRaw: firstPtr,
-        learnset: firstParse.learnset,
-      },
-    ];
+    // The vanilla gLevelUpLearnsets[SPECIES_NONE] (species 0) slot points
+    // at an EMPTY learnset ({LEVEL_UP_END}), so the anchor above - which
+    // requires a NON-empty learnset - skips it and every entry would be
+    // attributed one species early. Recover it: when the immediately
+    // preceding u32 is a valid ROM pointer to a valid learnset sitting at
+    // a real table boundary, include it as species 0 so `entries[i]`
+    // lines up with species id `i`. (The preceding pointer can only be
+    // empty or invalid here - a non-empty one would already have anchored
+    // the scan 4 bytes earlier.) When the preceding bytes are zero-fill
+    // (no real boundary), the slot is incidental padding and is NOT
+    // included.
+    let tableStart = candidateStart;
+    let precedingEntry: LearnsetTableEntry | null = null;
+    const precedingPtrOffset = candidateStart - 4;
+    if (precedingPtrOffset > 0 && isRealTableBoundary(bytes, precedingPtrOffset)) {
+      const prePtr = readUint32Le(bytes, precedingPtrOffset);
+      if (prePtr >= GBA_ROM_BASE_ADDRESS && prePtr <= GBA_ROM_POINTER_UPPER) {
+        const preTargetOffset = prePtr - GBA_ROM_BASE_ADDRESS;
+        if (preTargetOffset >= 0 && preTargetOffset < bytes.length) {
+          const preParse = parseLearnsetArray(bytes, preTargetOffset);
+          if (preParse.ok) {
+            precedingEntry = {
+              pointerFileOffset: precedingPtrOffset,
+              pointerRaw: prePtr,
+              learnset: preParse.learnset,
+            };
+            tableStart = precedingPtrOffset;
+          }
+        }
+      }
+    }
+
+    const entries: LearnsetTableEntry[] = [];
+    if (precedingEntry !== null) entries.push(precedingEntry);
+    entries.push({
+      pointerFileOffset: candidateStart,
+      pointerRaw: firstPtr,
+      learnset: firstParse.learnset,
+    });
     let cursor = candidateStart + 4;
     while (entries.length < maxPointers) {
       if (cursor + 4 > bytes.length) break;
@@ -143,7 +177,7 @@ export function scanLearnsetPointerTable(
         (e) => e.learnset.entries.length > 0,
       ).length;
       return Object.freeze({
-        tableStart: candidateStart,
+        tableStart,
         tableEndExclusive: cursor,
         pointerCount: entries.length,
         entries: Object.freeze(entries),

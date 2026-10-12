@@ -31,6 +31,7 @@ import {
   parseEvolutionBlock,
   type EvolutionBlock,
 } from './evolution.js';
+import { isRealTableBoundary } from './table-boundary.js';
 
 /** Minimum blocks required to accept a run as the gEvolutionTable.
  *  Vanilla has ~411; even the smallest plausible test ROM clears 8. */
@@ -102,19 +103,44 @@ export function scanEvolutionTable(
     // populated == "the first 8 bytes at the candidate position are
     // a real Evolution struct, not zero-fill" - the tightest possible
     // anchor that works structurally.
-    // Trade-off: in vanilla, gEvolutionTable[0] = SPECIES_NONE
-    // (all-zero block) is correctly part of the real table but won't
-    // anchor a run - the scanner anchors at species 1 (Bulbasaur, slot
-    // 0 = EVO_LEVEL @ 16 → Ivysaur) instead, off-by-one. The reported
-    // `blocks[i]` corresponds to species `i+1` in that case. For
-    // synthetic fixtures where species 0 itself is populated, the
-    // alignment is exact. The graph builder must be aware of this
-    // when associating blocks to species ids.
+    //
+    // The canonical table has gEvolutionTable[0] = SPECIES_NONE (an
+    // all-zero block), so this anchor lands on species 1 and the block
+    // immediately before it is that leading species-0 slot. The
+    // recovery step below re-attaches it so `blocks[i]` == species `i`
+    // (see the comment there).
     const firstBlockResult = parseEvolutionBlock(bytes, candidateStart);
     if (!firstBlockResult.ok) continue;
     if (firstBlockResult.block.slots[0]!.isEmpty) continue;
 
-    const blocks: EvolutionBlock[] = [firstBlockResult.block];
+    // The vanilla gEvolutionTable[SPECIES_NONE] (species 0) slot is an
+    // all-zero block - it carries no evolution, so the anchor above
+    // (which requires a POPULATED slot 0) skips it and every subsequent
+    // block would be reported one species early. Recover it: when the
+    // immediately preceding 40-byte block is a valid, all-empty species
+    // slot sitting at a real table boundary, include it as species 0 so
+    // `blocks[i]` lines up with species id `i`. This mirrors
+    // scanBaseStatsTable, which keeps the canonical leading SPECIES_NONE
+    // sentinel. When the preceding bytes are zero-fill (no real
+    // boundary), the block is incidental padding and is NOT included.
+    let tableStart = candidateStart;
+    const precedingOffset = candidateStart - EVOLUTION_BLOCK_SIZE_BYTES;
+    let precedingBlock: EvolutionBlock | null = null;
+    if (precedingOffset > 0) {
+      const preceding = parseEvolutionBlock(bytes, precedingOffset);
+      if (
+        preceding.ok &&
+        preceding.block.populatedSlots.length === 0 &&
+        isRealTableBoundary(bytes, precedingOffset)
+      ) {
+        precedingBlock = preceding.block;
+        tableStart = precedingOffset;
+      }
+    }
+
+    const blocks: EvolutionBlock[] = precedingBlock
+      ? [precedingBlock, firstBlockResult.block]
+      : [firstBlockResult.block];
     let cursor = candidateStart + EVOLUTION_BLOCK_SIZE_BYTES;
     while (blocks.length < maxBlocks) {
       if (cursor + EVOLUTION_BLOCK_SIZE_BYTES > bytes.length) break;
@@ -127,7 +153,7 @@ export function scanEvolutionTable(
       const populatedBlockCount = blocks.filter((b) => b.populatedSlots.length > 0).length;
       if (populatedBlockCount >= minPopulatedBlocks) {
         return Object.freeze({
-          tableStart: candidateStart,
+          tableStart,
           tableEndExclusive: cursor,
           blockCount: blocks.length,
           blocks: Object.freeze(blocks),
