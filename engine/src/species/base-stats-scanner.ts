@@ -40,6 +40,7 @@ import {
   parseBaseStats,
   type BaseStats,
 } from './base-stats.js';
+import { isRealTableBoundary } from './table-boundary.js';
 
 /** Recognise a SPECIES_NONE-style sentinel slot - all stats zero,
  *  types ≤ 17, growth rate ≤ 5, all padding bytes zero. Vanilla FRLG
@@ -271,20 +272,6 @@ function tryParseRun(
   const firstRealOffset =
     records.length > 0 ? records[0]!.fileOffset : start;
   return { records, realCount, firstRealOffset };
-}
-
-/** Look 16 bytes before `offset`; if ANY is non-zero, this is a
- *  real table boundary (the table genuinely starts here with a
- *  leading SPECIES_NONE sentinel). If all 16 are zero, the all-zero
- *  region extends further back and the leading sentinels are
- *  incidental padding rather than canonical table entries. */
-function isRealTableBoundary(bytes: Uint8Array, offset: number): boolean {
-  if (offset <= 0) return true; // table at file offset 0 - accept
-  const checkStart = Math.max(0, offset - 16);
-  for (let i = checkStart; i < offset; i++) {
-    if (bytes[i] !== 0) return true;
-  }
-  return false;
 }
 
 function isAllZeroRecord(r: BaseStats): boolean {

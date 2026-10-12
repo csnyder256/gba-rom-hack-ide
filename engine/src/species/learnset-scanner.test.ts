@@ -143,6 +143,41 @@ describe('scanLearnsetPointerTable - happy paths', () => {
       expect(r.pointerCount).toBe(8);
     }
   });
+
+  it('re-attaches the leading empty SPECIES_NONE learnset at a real table boundary', () => {
+    // Vanilla layout: species 0 points at an EMPTY learnset; species 1..
+    // point at non-empty ones. The anchor lands on species 1; the scanner
+    // must re-attach the preceding species-0 slot so entries[i] ==
+    // species i. A non-zero byte just before the table marks a real
+    // boundary (vs incidental zero-fill).
+    const buf = Buffer.alloc(0x4000);
+    const tableAt = 0x100;
+    buf.writeUInt8(0xaa, tableAt - 1); // preceding ROM data
+    const emptyArrayAt = 0x200;
+    plantLearnset(buf, emptyArrayAt, []); // species 0 → {0xFFFF}
+    let arrayCursor = 0x300;
+    const arrayOffsets: number[] = [];
+    for (let i = 0; i < 8; i++) {
+      arrayOffsets.push(arrayCursor);
+      arrayCursor = plantLearnset(buf, arrayCursor, [[1, 1 + i]]);
+    }
+    buf.writeUInt32LE((GBA_ROM_BASE_ADDRESS + emptyArrayAt) >>> 0, tableAt + 0 * 4);
+    for (let i = 0; i < 8; i++) {
+      buf.writeUInt32LE(
+        (GBA_ROM_BASE_ADDRESS + arrayOffsets[i]) >>> 0,
+        tableAt + (i + 1) * 4,
+      );
+    }
+    const r = scanLearnsetPointerTable(buf);
+    expect(r).not.toBeNull();
+    if (r !== null) {
+      expect(r.tableStart).toBe(tableAt); // species 0's pointer, not tableAt + 4
+      expect(r.entries[0]?.learnset.entries.length).toBe(0); // species 0 = empty
+      expect(r.entries[1]?.learnset.entries[0]?.move).toBe(1); // species 1
+      expect(r.pointerCount).toBe(9);
+      expect(r.populatedEntryCount).toBe(8);
+    }
+  });
 });
 
 describe('scanLearnsetPointerTable - rejection cases', () => {

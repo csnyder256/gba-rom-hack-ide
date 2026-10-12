@@ -36,10 +36,11 @@
  *
  * Anchor: FIRST slot must have ≥ 1 bit set. Defeats zero-fill
  * prefix matching that would otherwise anchor the run at the
- * first species-NONE-style entry. Trade-off: vanilla gTMHMLearnsets
- * [SPECIES_NONE] = 0 means the scanner anchors at species 1
- * (Bulbasaur, which learns ~30 TMs) instead of species 0 - symmetric
- * off-by-one with P8-T4 evolutions and P8-T5 learnsets.
+ * first species-NONE-style entry. Vanilla gTMHMLearnsets
+ * [SPECIES_NONE] = 0 means the scan anchors at species 1 (Bulbasaur,
+ * which learns ~30 TMs); the leading species-0 slot is re-attached
+ * afterwards (see the recovery step in `scanTMHMTable`) so
+ * `slots[i]` == species `i`.
  *
  * PD 5: structural-only - no baked offsets; PD 8: every byte of
  * the discovered table is registered in coverage.
@@ -51,6 +52,7 @@ import {
   parseTMHMCompat,
   type TMHMCompat,
 } from './tmhm.js';
+import { isRealTableBoundary } from './table-boundary.js';
 
 /** Minimum total slots required to accept a run. Vanilla 411
  *  species clears 32 trivially. */
@@ -64,8 +66,9 @@ export const TMHM_SCAN_MIN_POPULATED_SLOTS = 8;
 export const TMHM_SCAN_MAX_SLOTS = 4096;
 
 export interface TMHMTable {
-  /** ROM file offset of the first slot (= species id of the first
-   *  populated slot - accounting for the anchor's off-by-one). */
+  /** ROM file offset of the first slot (the leading empty
+   *  SPECIES_NONE slot when it could be recovered, so `slots[i]` ==
+   *  species id `i`). */
   readonly tableStart: number;
   /** Exclusive end offset. */
   readonly tableEndExclusive: number;
@@ -132,7 +135,32 @@ export function scanTMHMTable(
     if (!firstSlotResult.ok) continue;
     if (firstSlotResult.tmhm.setBitCount === 0) continue;
 
-    const slots: TMHMCompat[] = [firstSlotResult.tmhm];
+    // The vanilla gTMHMLearnsets[SPECIES_NONE] (species 0) slot is an
+    // all-zero bitfield (learns no TMs), so the anchor above - which
+    // requires ≥1 bit set - skips it and every slot would be attributed
+    // one species early. Recover it: when the immediately preceding
+    // 8-byte slot is a valid, empty (no-bit) species slot sitting at a
+    // real table boundary, include it as species 0 so `slots[i]` lines
+    // up with species id `i`. When the preceding bytes are zero-fill (no
+    // real boundary), the slot is incidental padding and is NOT included.
+    let tableStart = candidateStart;
+    let precedingSlot: TMHMCompat | null = null;
+    const precedingOffset = candidateStart - TMHM_STRUCT_SIZE_BYTES;
+    if (precedingOffset > 0) {
+      const preceding = parseTMHMCompat(bytes, precedingOffset);
+      if (
+        preceding.ok &&
+        preceding.tmhm.setBitCount === 0 &&
+        isRealTableBoundary(bytes, precedingOffset)
+      ) {
+        precedingSlot = preceding.tmhm;
+        tableStart = precedingOffset;
+      }
+    }
+
+    const slots: TMHMCompat[] = precedingSlot
+      ? [precedingSlot, firstSlotResult.tmhm]
+      : [firstSlotResult.tmhm];
     let cursor = candidateStart + TMHM_STRUCT_SIZE_BYTES;
     while (slots.length < maxSlots) {
       if (cursor + TMHM_STRUCT_SIZE_BYTES > bytes.length) break;
@@ -160,7 +188,7 @@ export function scanTMHMTable(
       );
       if (populatedSlotCount >= minPopulatedSlots && anySlotHasHighBit) {
         return Object.freeze({
-          tableStart: candidateStart,
+          tableStart,
           tableEndExclusive: cursor,
           slotCount: slots.length,
           slots: Object.freeze(slots),

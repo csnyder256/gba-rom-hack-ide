@@ -96,6 +96,26 @@ describe('scanTMHMTable - happy paths', () => {
       expect(r.slotCount).toBeGreaterThanOrEqual(32);
     }
   });
+
+  it('re-attaches the leading empty SPECIES_NONE slot at a real table boundary', () => {
+    // Vanilla layout: species 0 is an all-zero (no-TM) slot; species 1..
+    // are populated. The anchor lands on species 1; the scanner must
+    // re-attach the preceding species-0 slot so slots[i] == species i. A
+    // non-zero byte just before the table marks a real boundary (vs
+    // incidental zero-fill).
+    const buf = Buffer.alloc(0x2000);
+    const tableAt = 0x100;
+    buf.writeUInt8(0xaa, tableAt - 1); // preceding ROM data
+    plantN(buf, tableAt + TMHM_STRUCT_SIZE_BYTES, 32);
+    const r = scanTMHMTable(buf);
+    expect(r).not.toBeNull();
+    if (r !== null) {
+      expect(r.tableStart).toBe(tableAt); // species 0's slot, not tableAt + 8
+      expect(r.slots[0]?.setBitCount).toBe(0); // species 0 = learns no TMs
+      expect(r.slots[1]?.setBitIndices).toEqual([0, 56]); // species 1
+      expect(r.populatedSlotCount).toBe(32);
+    }
+  });
 });
 
 describe('scanTMHMTable - rejection cases', () => {
