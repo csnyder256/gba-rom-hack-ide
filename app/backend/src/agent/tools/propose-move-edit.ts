@@ -31,10 +31,14 @@ export const PROPOSE_MOVE_EDIT_DESCRIPTION =
   'Field bounds:\n' +
   '  power, accuracy, pp, secondaryEffectChance, target, type, effect: 0..255\n' +
   '  priority: -7..+7 (s8 - wraps in the encoded byte)\n' +
-  '  flags: 0..4294967295 (u32 LE - bitmask of MOVE_FLAG_* constants)\n\n' +
+  "  flags: 0..255 (u8 - a ONE-byte bitfield: bit 0 contact, 1 Protect, " +
+  "2 Magic Coat, 3 Snatch, 4 Mirror Move, 5 King's Rock)\n\n" +
   'The 12-byte struct layout is: { u8 effect; u8 power; u8 type; u8 ' +
   'accuracy; u8 pp; u8 secondaryEffectChance; u8 target; s8 priority; ' +
-  'u32 flags; } - same across vanilla FRLG, Emerald, and FRLG-based hacks.';
+  'u8 flags; u8 padding[3]; } - same across vanilla FRLG, Emerald, and ' +
+  'FRLG-based hacks. `flags` occupies exactly ONE byte at 0x08; bytes ' +
+  '0x09..0x0B are struct padding that the format requires to be 0x00, so ' +
+  'this tool never writes them.';
 
 /** Field offsets within the 12-byte BattleMove struct. Mirrors pret/
  *  pokefirered's include/pokemon.h definition. */
@@ -47,14 +51,16 @@ const FIELD_OFFSETS = {
   secondaryEffectChance: 0x05,
   target: 0x06,
   priority: 0x07, // s8 - caller passes -128..127; we encode as two's complement byte
-  flags: 0x08, // u32 LE
+  flags: 0x08, // u8 - ONE-byte bitfield (contact / Protect / Magic Coat / Snatch / Mirror Move / King's Rock)
+  // 0x09..0x0B: struct padding. The documented Gen-3 move structure
+  // requires all three bytes to be 0x00, and the engine's move-table
+  // detector relies on that, so nothing here may write them.
 } as const;
 
 const MOVE_STRUCT_SIZE = 12;
 
 const u8 = z.number().int().min(0).max(255);
 const s8 = z.number().int().min(-128).max(127);
-const u32 = z.number().int().min(0).max(0xffffffff);
 
 export const proposeMoveEditInputShape = {
   moveIndex: z.number().int().nonnegative(),
@@ -68,7 +74,7 @@ export const proposeMoveEditInputShape = {
       secondaryEffectChance: u8.optional(),
       target: u8.optional(),
       priority: s8.optional(),
-      flags: u32.optional(),
+      flags: u8.optional(),
     })
     .refine((obj) => Object.keys(obj).length > 0, {
       message: 'At least one field must be provided.',
@@ -174,23 +180,35 @@ export async function proposeMoveEdit(
 
   const changedFields: string[] = [];
   const fields = args.fields;
+  // `flags` is a ONE-byte bitfield at 0x08. The three bytes after it
+  // (0x09..0x0B) are struct padding that the documented Gen-3 move
+  // structure requires to be 0x00 - and the engine's move-table detector
+  // rejects an entry whose padding is non-zero, which truncates (or loses)
+  // the whole detected table. Refuse an out-of-range value here instead of
+  // letting it spill into the padding.
+  if (
+    fields.flags !== undefined &&
+    (!Number.isInteger(fields.flags) || fields.flags < 0 || fields.flags > 0xff)
+  ) {
+    return {
+      proposal: null,
+      moveIndex: args.moveIndex,
+      moveName: move.name,
+      changedFields: [],
+      message:
+        `flags must be a u8 in [0, 255]; got ${String(fields.flags)}. The move ` +
+        'flags field is one byte at struct offset 0x08 (bit 0 contact, 1 ' +
+        "Protect, 2 Magic Coat, 3 Snatch, 4 Mirror Move, 5 King's Rock); " +
+        '0x09..0x0B are padding and must stay 0x00.',
+    };
+  }
   for (const [name, value] of Object.entries(fields)) {
     if (value === undefined) continue;
     const fieldOffset = FIELD_OFFSETS[name as keyof typeof FIELD_OFFSETS];
     if (fieldOffset === undefined) continue;
-    if (name === 'flags') {
-      // u32 LE - 4 bytes.
-      afterBytes[fieldOffset] = value & 0xff;
-      afterBytes[fieldOffset + 1] = (value >>> 8) & 0xff;
-      afterBytes[fieldOffset + 2] = (value >>> 16) & 0xff;
-      afterBytes[fieldOffset + 3] = (value >>> 24) & 0xff;
-    } else if (name === 'priority') {
-      // s8 - encode two's complement (& 0xFF).
-      afterBytes[fieldOffset] = value & 0xff;
-    } else {
-      // u8.
-      afterBytes[fieldOffset] = value & 0xff;
-    }
+    // Every writable field is exactly one byte wide: the u8 fields store
+    // the value directly, and `priority` (s8) stores its two's complement.
+    afterBytes[fieldOffset] = value & 0xff;
     changedFields.push(name);
   }
 
