@@ -139,7 +139,13 @@ export interface EnrichedMap {
   readonly weather: number;
   readonly caveOrType: number;
   readonly battleType: number;
+  /** MapHeader byte 0x18 (pret `allow_cycling`). */
+  readonly bikingAllowed: boolean;
+  /** MapHeader flags byte 0x19: bit0 allowEscaping, bit1 allowRunning,
+   *  bits 2..7 showMapName. */
   readonly flags: number;
+  /** MapHeader byte 0x1A (s8 floor number; negative for basements). */
+  readonly floorNum: number;
   /** Iter UX-B - region-map section id byte (MapHeader offset 0x14).
    *  Indexes into the universal Gen-3 gRegionMapEntries table; the
    *  region_map_sections_system detector + cross-ref resolves this
@@ -452,7 +458,9 @@ export const mapSystemDetector: RomDetector<MapSystemReport> = {
             weather: header.weather,
             caveOrType: header.caveOrType,
             battleType: header.battleType,
+            bikingAllowed: header.bikingAllowed,
             flags: header.flags,
+            floorNum: header.floorNum,
             regionMapSection: header.regionMapSection,
           }),
         );
@@ -511,6 +519,7 @@ export const mapSystemDetector: RomDetector<MapSystemReport> = {
       caveOrType: number;
       battleType: number;
       flags: number;
+      bikingAllowed: boolean;
     }> = [];
     for (const em of enrichedMaps) {
       if (seenHeaders.has(em.mapHeaderOffset)) continue;
@@ -521,6 +530,7 @@ export const mapSystemDetector: RomDetector<MapSystemReport> = {
         caveOrType: em.caveOrType,
         battleType: em.battleType,
         flags: em.flags,
+        bikingAllowed: em.bikingAllowed,
       });
     }
     const mapPropertiesHistogram = aggregateMapProperties(uniqueMapsForHist);

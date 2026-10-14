@@ -301,7 +301,13 @@ const liftMapSystem: ManifestLifter = (row, ctx) =>
       weather: number;
       caveOrType: number;
       battleType: number;
+      /** MapHeader byte 0x18 (pret `allow_cycling`). */
+      bikingAllowed: boolean;
+      /** MapHeader flags byte 0x19 (bit0 allowEscaping, bit1 allowRunning,
+       *  bits 2..7 showMapName). */
       flags: number;
+      /** MapHeader byte 0x1A (s8 floor number). */
+      floorNum: number;
       musicId: number;
       regionMapSection?: number;
       layout: {
@@ -622,7 +628,9 @@ const liftMapSystem: ManifestLifter = (row, ctx) =>
           weather: em.weather,
           caveOrType: em.caveOrType,
           battleType: em.battleType,
+          bikingAllowed: em.bikingAllowed,
           flags: em.flags,
+          floorNum: em.floorNum,
           groupIndex: em.groupIndex ?? -1,
           mapNum: em.mapNum,
           // Phase UX-B - stash the region-map section id byte so cross-ref

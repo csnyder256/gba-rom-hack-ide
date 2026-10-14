@@ -12,7 +12,8 @@ import { scanMapHeaders, totalMapHeaderBytes } from './scanner.js';
  * Each MapHeader has:
  *   layoutPointer = a valid in-buffer offset (= firstHeaderAt + N*28 + i*4)
  *   mapType = (i % 9) + 1 (cycles 1..9, all plausible)
- *   padding = 0 (not 0xFF, so implausible_padding doesn't trip)
+ *   bikingAllowed = 0, flags = 0 (not 0xFF/0xFF, so implausible_map_flags
+ *   doesn't trip)
  */
 function plantMapTable(args: {
   bufferSize: number;

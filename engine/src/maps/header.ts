@@ -5,7 +5,7 @@
  * derivative hack/decomp/fork shares a stable in-memory MapHeader layout
  * - 28 bytes per entry - that's been publicly documented by the pret
  * decomp project (pokeemerald, pokefirered) and the broader hacking
- * community. Reference: pret/pokefirered's `include/global.map.h`.
+ * community. Reference: pret/pokefirered's `include/global.fieldmap.h`.
  *
  *   offset  size  field
  *   0x00    4     mapLayoutPointer - ROM pointer to map layout
@@ -19,10 +19,22 @@
  *   0x15    1     caveOrType - terrain/cave subtype byte
  *   0x16    1     weather - weather type byte
  *   0x17    1     mapType - 1..9 enum (city/route/cave/etc)
- *   0x18    1     unused1
- *   0x19    1     unused2
- *   0x1A    1     flags - bitfield (escape rope, fly, etc.)
+ *   0x18    1     bikingAllowed - bool8 (the `allow_cycling` argument of
+ *                                          pret's `map_header_flags` macro)
+ *   0x19    1     flags - bitfield: bit0 allowEscaping, bit1 allowRunning,
+ *                                          bits 2..7 showMapName. This is the
+ *                                          second byte emitted by pret's
+ *                                          `map_header_flags` macro.
+ *   0x1A    1     floorNum - s8 (negative for basements)
  *   0x1B    1     battleType - encounter-music selector
+ *
+ * NOTE (2026-10-14): 0x18 and 0x19 used to be modelled as "unused padding"
+ * and the flags bitfield was read from 0x1A. That was wrong: 0x1A is
+ * `floorNum`, and 0x18/0x19 carry the map-header flags. Reading the flags
+ * byte at 0x1A meant `set_map_metadata`-style edits wrote the floor number
+ * instead of the escape/run/show-name flags, and the cycling permission
+ * byte was never surfaced at all. The offsets below are the corrected
+ * pret layout.
  *
  * IMPORTANT: this is a STRUCTURAL signature - not a baked offset (PD 5).
  * We never assume map headers live at a specific address in any specific
@@ -41,6 +53,12 @@ export const MAP_TYPE_MAX = 9;
 /** Highest plausible region-map section id (vanilla uses up to ~0x58). */
 export const REGION_MAP_SECTION_MAX = 0xff;
 
+/** Field offsets within a MapHeader struct (pret `struct MapHeader`). */
+export const MAP_HEADER_OFFSET_BIKING_ALLOWED = 0x18;
+export const MAP_HEADER_OFFSET_FLAGS = 0x19;
+export const MAP_HEADER_OFFSET_FLOOR_NUM = 0x1a;
+export const MAP_HEADER_OFFSET_BATTLE_TYPE = 0x1b;
+
 export interface MapHeader {
   readonly mapLayoutOffset: number;
   readonly eventsOffset: number | null; // nullable: NULL pointer is legal
@@ -52,7 +70,14 @@ export interface MapHeader {
   readonly caveOrType: number;
   readonly weather: number;
   readonly mapType: number;
+  /** Biking allowed on this map - MapHeader byte 0x18 (bool8; pret's
+   *  `allow_cycling`). */
+  readonly bikingAllowed: boolean;
+  /** Map-flags bitfield - MapHeader byte 0x19: bit 0 allowEscaping,
+   *  bit 1 allowRunning, bits 2..7 showMapName. */
   readonly flags: number;
+  /** Floor number - MapHeader byte 0x1A (s8; negative for basements). */
+  readonly floorNum: number;
   readonly battleType: number;
 }
 
@@ -60,7 +85,7 @@ export type MapHeaderParseFailure =
   | { kind: 'too_short'; bytesAvailable: number; bytesRequired: number }
   | { kind: 'invalid_map_layout_pointer'; rawAddress: number }
   | { kind: 'implausible_map_type'; observed: number; max: number }
-  | { kind: 'implausible_padding'; observed1: number; observed2: number };
+  | { kind: 'implausible_map_flags'; bikingAllowedByte: number; flagsByte: number };
 
 export type MapHeaderParseResult =
   | { ok: true; header: MapHeader }
@@ -71,8 +96,10 @@ export type MapHeaderParseResult =
  * Header. Returns ok=true only when the structural constraints are
  * satisfied - the mapLayoutPointer is a valid ROM pointer within the
  * same ROM, the mapType byte is in the plausible 1..MAP_TYPE_MAX range,
- * and the two reserved-padding bytes are not BOTH 0xFF (a common
- * uninitialized-memory marker).
+ * and the bikingAllowed + flags bytes are not BOTH 0xFF (a common
+ * uninitialized-memory marker: bikingAllowed is a bool8 and the flags
+ * byte's upper bits are the showMapName count, so neither is 0xFF in
+ * real data).
  *
  * The eventsPointer / mapScriptsPointer / connectionsPointer fields are
  * allowed to be NULL (0x00000000) - many maps have no events, scripts,
@@ -147,10 +174,12 @@ export function parseMapHeader(bytes: Uint8Array, offset: number): MapHeaderPars
   const caveOrType = bytes[offset + 0x15] ?? 0;
   const weather = bytes[offset + 0x16] ?? 0;
   const mapType = bytes[offset + 0x17] ?? 0;
-  const padding1 = bytes[offset + 0x18] ?? 0;
-  const padding2 = bytes[offset + 0x19] ?? 0;
-  const flags = bytes[offset + 0x1a] ?? 0;
-  const battleType = bytes[offset + 0x1b] ?? 0;
+  const bikingAllowedByte = bytes[offset + MAP_HEADER_OFFSET_BIKING_ALLOWED] ?? 0;
+  const flags = bytes[offset + MAP_HEADER_OFFSET_FLAGS] ?? 0;
+  const floorNumByte = bytes[offset + MAP_HEADER_OFFSET_FLOOR_NUM] ?? 0;
+  const battleType = bytes[offset + MAP_HEADER_OFFSET_BATTLE_TYPE] ?? 0;
+  // floorNum is s8 - negative for basements (e.g. B1F).
+  const floorNum = floorNumByte < 0x80 ? floorNumByte : floorNumByte - 0x100;
 
   // mapType is a published Gen-3 enum: 1=Town, 2=City, 3=Route, 4=Underground,
   // 5=Underwater, 6=Ocean, 7=Mt, 8=Indoor, 9=Secret. Values outside 1..9
@@ -164,13 +193,13 @@ export function parseMapHeader(bytes: Uint8Array, offset: number): MapHeaderPars
     };
   }
 
-  if (padding1 === 0xff && padding2 === 0xff) {
+  if (bikingAllowedByte === 0xff && flags === 0xff) {
     return {
       ok: false,
       failure: {
-        kind: 'implausible_padding',
-        observed1: padding1,
-        observed2: padding2,
+        kind: 'implausible_map_flags',
+        bikingAllowedByte,
+        flagsByte: flags,
       },
     };
   }
@@ -188,7 +217,9 @@ export function parseMapHeader(bytes: Uint8Array, offset: number): MapHeaderPars
       caveOrType,
       weather,
       mapType,
+      bikingAllowed: bikingAllowedByte !== 0,
       flags,
+      floorNum,
       battleType,
     }),
   };

@@ -25,7 +25,8 @@ function plantMapHeader(args: {
   buf.writeUInt16LE(args.musicId ?? 0, args.headerAt + 0x10);
   buf.writeUInt16LE(args.mapLayoutId ?? 0, args.headerAt + 0x12);
   buf[args.headerAt + 0x17] = args.mapType ?? 1;
-  // padding bytes 0x18, 0x19 already zero (Buffer.alloc).
+  // bytes 0x18 (bikingAllowed), 0x19 (flags), 0x1A (floorNum) already zero
+  // (Buffer.alloc), which is a valid combination.
   return buf;
 }
 
@@ -126,13 +127,63 @@ describe('parseMapHeader - failure modes', () => {
     if (!r.ok) expect(r.failure.kind).toBe('implausible_map_type');
   });
 
-  it('fails implausible_padding when both reserved bytes are 0xFF', () => {
+  it('fails implausible_map_flags when the bikingAllowed + flags bytes are both 0xFF', () => {
     const buf = plantMapHeader({ bufferSize: 4096, headerAt: 0x100, layoutOffset: 0x800, mapType: 3 });
-    buf[0x100 + 0x18] = 0xff;
-    buf[0x100 + 0x19] = 0xff;
+    buf[0x100 + 0x18] = 0xff; // bikingAllowed is a bool8 - never 0xFF
+    buf[0x100 + 0x19] = 0xff; // flags byte's upper bits are the showMapName count
     const r = parseMapHeader(buf, 0x100);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.failure.kind).toBe('implausible_padding');
+    if (!r.ok) {
+      expect(r.failure.kind).toBe('implausible_map_flags');
+      if (r.failure.kind === 'implausible_map_flags') {
+        expect(r.failure.bikingAllowedByte).toBe(0xff);
+        expect(r.failure.flagsByte).toBe(0xff);
+      }
+    }
+  });
+});
+
+describe('parseMapHeader - bytes 0x18..0x1B field layout (pret struct MapHeader)', () => {
+  it('reads bikingAllowed@0x18, flags@0x19, floorNum@0x1A, battleType@0x1B', () => {
+    const buf = plantMapHeader({ bufferSize: 4096, headerAt: 0x100, layoutOffset: 0x800, mapType: 3 });
+    buf[0x100 + 0x18] = 0x01; // bikingAllowed = true (allow_cycling)
+    buf[0x100 + 0x19] = 0x02; // flags: bit1 allowRunning
+    buf[0x100 + 0x1a] = 0xff; // floorNum = -1 (B1F)
+    buf[0x100 + 0x1b] = 0x04; // battleType
+    const r = parseMapHeader(buf, 0x100);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.header.bikingAllowed).toBe(true);
+      expect(r.header.flags).toBe(0x02);
+      expect(r.header.floorNum).toBe(-1);
+      expect(r.header.battleType).toBe(0x04);
+    }
+  });
+
+  it('does NOT read the flags bitfield from 0x1A (the former, wrong offset)', () => {
+    const buf = plantMapHeader({ bufferSize: 4096, headerAt: 0x100, layoutOffset: 0x800, mapType: 3 });
+    buf[0x100 + 0x1a] = 0x0f; // this is a floor number, not a flags byte
+    const r = parseMapHeader(buf, 0x100);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.header.flags).toBe(0);
+      expect(r.header.floorNum).toBe(0x0f);
+    }
+  });
+
+  it('reads a positive floor number from 0x1A', () => {
+    const buf = plantMapHeader({ bufferSize: 4096, headerAt: 0x100, layoutOffset: 0x800, mapType: 3 });
+    buf[0x100 + 0x1a] = 0x02; // 2F
+    const r = parseMapHeader(buf, 0x100);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.header.floorNum).toBe(2);
+  });
+
+  it('reports bikingAllowed = false when byte 0x18 is 0', () => {
+    const buf = plantMapHeader({ bufferSize: 4096, headerAt: 0x100, layoutOffset: 0x800, mapType: 3 });
+    const r = parseMapHeader(buf, 0x100);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.header.bikingAllowed).toBe(false);
   });
 });
 
