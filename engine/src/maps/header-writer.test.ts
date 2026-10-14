@@ -15,7 +15,9 @@ describe('encodeMapHeader', () => {
       caveOrType: 0,
       weather: 0,
       mapType: 1, // Town
+      bikingAllowed: true,
       flags: 0x06,
+      floorNum: -1,
       battleType: 0,
     } as const;
     const bytes = encodeMapHeader(spec);
@@ -35,8 +37,32 @@ describe('encodeMapHeader', () => {
       expect(parsed.header.mapLayoutId).toBe(0x14);
       expect(parsed.header.regionMapSection).toBe(0x58);
       expect(parsed.header.mapType).toBe(1);
+      expect(parsed.header.bikingAllowed).toBe(true);
       expect(parsed.header.flags).toBe(0x06);
+      expect(parsed.header.floorNum).toBe(-1);
     }
+  });
+
+  it('writes bikingAllowed to 0x18 and the flags byte to 0x19', () => {
+    const bytes = encodeMapHeader({
+      mapLayoutOffset: 0x100000,
+      eventsOffset: null,
+      mapScriptsOffset: null,
+      connectionsOffset: null,
+      musicId: 0,
+      mapLayoutId: 0,
+      regionMapSection: 0,
+      caveOrType: 0,
+      weather: 0,
+      mapType: 1,
+      bikingAllowed: true,
+      flags: 0x02,
+      floorNum: -2,
+      battleType: 0,
+    });
+    expect(bytes[0x18]).toBe(0x01); // bikingAllowed
+    expect(bytes[0x19]).toBe(0x02); // flags
+    expect(bytes[0x1a]).toBe(0xfe); // floorNum -2 as s8
   });
 
   it('encodes NULL pointers for absent events/scripts/connections', () => {

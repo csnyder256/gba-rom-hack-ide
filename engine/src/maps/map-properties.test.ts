@@ -34,27 +34,23 @@ describe('nameFlagsBits', () => {
     expect(nameFlagsBits(0)).toEqual([]);
   });
 
-  it('decodes single bits to their canonical names', () => {
-    expect(nameFlagsBits(1)).toEqual(['ALLOW_CYCLING']);
-    expect(nameFlagsBits(2)).toEqual(['ALLOW_ESCAPING']);
-    expect(nameFlagsBits(4)).toEqual(['ALLOW_RUNNING']);
+  it('decodes bit 0/1 to their canonical names', () => {
+    expect(nameFlagsBits(1)).toEqual(['ALLOW_ESCAPING']);
+    expect(nameFlagsBits(2)).toEqual(['ALLOW_RUNNING']);
+  });
+
+  it('decodes the showMapName field (bits 2..7) to SHOW_MAP_NAME', () => {
+    expect(nameFlagsBits(4)).toEqual(['SHOW_MAP_NAME']);
     expect(nameFlagsBits(8)).toEqual(['SHOW_MAP_NAME']);
+    // Any non-zero value in bits 2..7 means "show map name".
+    expect(nameFlagsBits(0x80)).toEqual(['SHOW_MAP_NAME']);
   });
 
-  it('decodes multiple bits in ascending order', () => {
-    // 1 | 4 | 8 = 0x0D
-    expect(nameFlagsBits(0x0d)).toEqual([
-      'ALLOW_CYCLING',
-      'ALLOW_RUNNING',
-      'SHOW_MAP_NAME',
-    ]);
-  });
-
-  it('decodes unknown bit positions as UNKNOWN_BIT_<n>', () => {
-    // bit 5 (0x20) - not in MAP_FLAGS_BITS
-    expect(nameFlagsBits(0x20)).toEqual(['UNKNOWN_BIT_5']);
-    // Mixed: bits 0 + 6
-    expect(nameFlagsBits(0x41)).toEqual(['ALLOW_CYCLING', 'UNKNOWN_BIT_6']);
+  it('decodes multiple bits/fields in ascending order', () => {
+    // 0x0D = bits 0, 2, 3 → allowEscaping + showMapName (bits 2-3)
+    expect(nameFlagsBits(0x0d)).toEqual(['ALLOW_ESCAPING', 'SHOW_MAP_NAME']);
+    // 0x03 = allowEscaping + allowRunning, no showMapName
+    expect(nameFlagsBits(0x03)).toEqual(['ALLOW_ESCAPING', 'ALLOW_RUNNING']);
   });
 });
 
@@ -69,9 +65,9 @@ describe('aggregateMapProperties', () => {
 
   it('counts each named value once per map', () => {
     const r = aggregateMapProperties([
-      { mapType: 1, weather: 3, caveOrType: 0, battleType: 0, flags: 5 },
-      { mapType: 1, weather: 4, caveOrType: 0, battleType: 0, flags: 5 },
-      { mapType: 3, weather: 0, caveOrType: 1, battleType: 1, flags: 8 },
+      { mapType: 1, weather: 3, caveOrType: 0, battleType: 0, flags: 1, bikingAllowed: true },
+      { mapType: 1, weather: 4, caveOrType: 0, battleType: 0, flags: 1, bikingAllowed: true },
+      { mapType: 3, weather: 0, caveOrType: 1, battleType: 1, flags: 4 },
     ]);
     expect(r.mapCount).toBe(3);
     expect(r.mapType['TOWN']).toBe(2);
@@ -83,11 +79,22 @@ describe('aggregateMapProperties', () => {
     expect(r.caveOrType['NONE']).toBe(2);
     expect(r.battleType['GYM']).toBe(1);
     expect(r.battleType['NORMAL']).toBe(2);
-    // flagsBits: flags=5 has bits 0 + 2 = ALLOW_CYCLING + ALLOW_RUNNING (×2 maps)
-    // flags=8 has bit 3 = SHOW_MAP_NAME (×1 map)
+    // allow_cycling comes from byte 0x18 (bikingAllowed), not the flags byte.
     expect(r.flagsBits['ALLOW_CYCLING']).toBe(2);
-    expect(r.flagsBits['ALLOW_RUNNING']).toBe(2);
+    // flags=1 (×2 maps) has bit 0 = ALLOW_ESCAPING
+    expect(r.flagsBits['ALLOW_ESCAPING']).toBe(2);
+    // flags=4 (×1 map) is showMapName only
     expect(r.flagsBits['SHOW_MAP_NAME']).toBe(1);
+    expect(r.flagsBits['ALLOW_RUNNING']).toBeUndefined();
+  });
+
+  it('omits ALLOW_CYCLING when bikingAllowed is absent or false', () => {
+    const r = aggregateMapProperties([
+      { mapType: 1, weather: 0, caveOrType: 0, battleType: 0, flags: 0 },
+      { mapType: 1, weather: 0, caveOrType: 0, battleType: 0, flags: 0, bikingAllowed: false },
+    ]);
+    expect(r.flagsBits['ALLOW_CYCLING']).toBeUndefined();
+    expect(r.flagsBits).toEqual({});
   });
 
   it('returns frozen objects + nested tables', () => {
@@ -124,8 +131,8 @@ describe('name tables - well-formed', () => {
     }
   });
 
-  it('MAP_FLAGS_BITS has bits 0..3 named', () => {
-    for (let bit = 0; bit <= 3; bit++) {
+  it('MAP_FLAGS_BITS has bits 0..1 named', () => {
+    for (let bit = 0; bit <= 1; bit++) {
       expect(MAP_FLAGS_BITS[bit]).toBeDefined();
     }
   });

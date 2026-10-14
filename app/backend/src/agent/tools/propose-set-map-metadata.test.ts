@@ -59,10 +59,10 @@ function makeFakeRom(headerOffset: number, totalSize = 0x10000): Buffer {
   buf[headerOffset + 0x15] = 0;
   buf[headerOffset + 0x16] = 0;
   buf[headerOffset + 0x17] = 1; // Town
-  // padding @ 0x18-0x19 = 0
+  // bikingAllowed @ 0x18, flags @ 0x19, floorNum @ 0x1A
   buf[headerOffset + 0x18] = 0;
   buf[headerOffset + 0x19] = 0;
-  // flags + battleType
+  // floorNum + battleType
   buf[headerOffset + 0x1a] = 0;
   buf[headerOffset + 0x1b] = 0;
   return buf;
@@ -136,6 +136,22 @@ describe('proposeSetMapMetadata', () => {
     // afterBytes hex string - musicId LE at byte 0x10 = 00 01; weather at 0x16 = 05
     expect(edit.afterBytes.substring(0x10 * 2, 0x12 * 2)).toBe('0001');
     expect(edit.afterBytes.substring(0x16 * 2, 0x17 * 2)).toBe('05');
+  });
+
+  it('writes flags to 0x19 (the map-flags byte), not 0x1A (floorNum)', async () => {
+    await writeManifest(root, manifest([baseMap]));
+    const { fetchFn, captured } = fakeFetch();
+    const result = await proposeSetMapMetadata(
+      { projectRoot: root, baseUrl: 'http://x' },
+      { mapId: 'binary_map_3_19', bikingAllowed: true, flags: 0x03, floorNum: -1 },
+      { fetchFn },
+    );
+    expect(result.proposal).not.toBeNull();
+    expect(result.fieldsChanged).toEqual(['bikingAllowed', 'flags', 'floorNum']);
+    const edit = captured()!.edits[0] as { afterBytes: string };
+    expect(edit.afterBytes.substring(0x18 * 2, 0x19 * 2)).toBe('01'); // bikingAllowed
+    expect(edit.afterBytes.substring(0x19 * 2, 0x1a * 2)).toBe('03'); // flags (was wrongly 0x1A)
+    expect(edit.afterBytes.substring(0x1a * 2, 0x1b * 2)).toBe('ff'); // floorNum -1
   });
 
   it('rejects missing mapHeaderOffset', async () => {

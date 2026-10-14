@@ -39,8 +39,15 @@ export interface MapHeaderSpec {
   readonly weather: number;
   /** u8 - map type enum (1..9 per pret docs: 1=Town … 9=Secret). */
   readonly mapType: number;
-  /** u8 - flag bits (escape rope, fly, etc.). */
+  /** Biking allowed (bool8 at 0x18; pret's `allow_cycling`). Optional -
+   *  defaults to false. */
+  readonly bikingAllowed?: boolean;
+  /** u8 - map-flags bitfield at 0x19 (bit0 allowEscaping, bit1
+   *  allowRunning, bits 2..7 showMapName). */
   readonly flags: number;
+  /** s8 - floor number at 0x1A (negative for basements). Optional -
+   *  defaults to 0. */
+  readonly floorNum?: number;
   /** u8 - encounter-music selector. */
   readonly battleType: number;
 }
@@ -79,6 +86,14 @@ export function encodeMapHeader(spec: MapHeaderSpec): Uint8Array {
   }
   validateU8('flags', spec.flags);
   validateU8('battleType', spec.battleType);
+  const floorNum = spec.floorNum ?? 0;
+  if (!Number.isInteger(floorNum) || floorNum < -128 || floorNum > 127) {
+    throw new MapHeaderEncodeError(
+      'floorNum',
+      floorNum,
+      'must be an integer in [-128, 127] (s8 - negative for basements)',
+    );
+  }
 
   const out = new Uint8Array(MAP_HEADER_SIZE_BYTES);
   writePointer(out, 0x00, spec.mapLayoutOffset, 'mapLayoutOffset', /* allowNull */ false);
@@ -91,9 +106,9 @@ export function encodeMapHeader(spec: MapHeaderSpec): Uint8Array {
   out[0x15] = spec.caveOrType & 0xff;
   out[0x16] = spec.weather & 0xff;
   out[0x17] = spec.mapType & 0xff;
-  out[0x18] = 0x00; // padding1 - parser rejects 0xFF/0xFF; 0x00/0x00 is fine
-  out[0x19] = 0x00; // padding2
-  out[0x1a] = spec.flags & 0xff;
+  out[0x18] = spec.bikingAllowed === true ? 0x01 : 0x00; // bikingAllowed (bool8)
+  out[0x19] = spec.flags & 0xff; // map-flags bitfield
+  out[0x1a] = floorNum & 0xff; // floorNum (s8)
   out[0x1b] = spec.battleType & 0xff;
   return out;
 }

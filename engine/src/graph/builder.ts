@@ -202,7 +202,13 @@ export function buildRelationshipGraph(args: BuildRelationshipGraphArgs): Relati
       weather: number;
       caveOrType: number;
       battleType: number;
+      /** MapHeader byte 0x18 (pret `allow_cycling`). */
+      bikingAllowed: boolean;
+      /** MapHeader flags byte 0x19 (bit0 allowEscaping, bit1 allowRunning,
+       *  bits 2..7 showMapName). */
       flags: number;
+      /** MapHeader byte 0x1A (s8 floor number). */
+      floorNum: number;
     };
     const data = mapSystemRow.detection.data as
       | {
@@ -275,7 +281,9 @@ export function buildRelationshipGraph(args: BuildRelationshipGraphArgs): Relati
         const weather = enriched?.weather ?? 0;
         const caveOrType = enriched?.caveOrType ?? 0;
         const battleType = enriched?.battleType ?? 0;
+        const bikingAllowed = enriched?.bikingAllowed ?? false;
         const flags = enriched?.flags ?? 0;
+        const floorNum = enriched?.floorNum ?? 0;
         builder.addNode({
           id: mapId,
           kind: 'map',
@@ -293,8 +301,10 @@ export function buildRelationshipGraph(args: BuildRelationshipGraphArgs): Relati
             caveOrTypeName: nameFromTable(MAP_CAVE_OR_TYPE_NAMES, caveOrType),
             battleType,
             battleTypeName: nameFromTable(MAP_BATTLE_TYPE_NAMES, battleType),
+            bikingAllowed,
             flags,
             flagsBitsSet: nameFlagsBits(flags),
+            floorNum,
             tableStart: c.tableStart,
           },
         });

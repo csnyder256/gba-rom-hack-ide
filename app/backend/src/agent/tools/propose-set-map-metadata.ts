@@ -23,7 +23,7 @@ export const PROPOSE_SET_MAP_METADATA_TOOL_NAME = 'propose_set_map_metadata';
 
 export const PROPOSE_SET_MAP_METADATA_DESCRIPTION =
   'Set per-map metadata (music, weather, type, region-map section,\n' +
-  'flags) in-place on the MapHeader struct.\n\n' +
+  'biking, flags, floor, battle type) in-place on the MapHeader struct.\n\n' +
   'Inputs (all optional - pass only the fields you want to change):\n' +
   '  - `mapId`: the map id.\n' +
   '  - `musicId`: u16 - music track to play on this map.\n' +
@@ -31,8 +31,11 @@ export const PROPOSE_SET_MAP_METADATA_DESCRIPTION =
   '  - `mapType`: 1..9 (1=Town, 2=City, 3=Route, …, 9=Secret).\n' +
   '  - `regionMapSection`: u8 (0x58 = NONE).\n' +
   '  - `caveOrType`: u8 - terrain subtype.\n' +
-  '  - `flags`: u8 - bitfield (escape rope, fly, etc.).\n' +
-  '  - `battleType`: u8 - encounter-music selector.';
+  '  - `bikingAllowed`: bool - allow cycling on this map (byte 0x18).\n' +
+  '  - `flags`: u8 - map-flags bitfield (byte 0x19): bit0 allowEscaping,\n' +
+  '    bit1 allowRunning, bits 2..7 showMapName.\n' +
+  '  - `floorNum`: s8 - floor number (byte 0x1A; negative for basements).\n' +
+  '  - `battleType`: u8 - encounter-music selector (byte 0x1B).';
 
 const u8 = z.number().int().min(0).max(0xff);
 const u16 = z.number().int().min(0).max(0xffff);
@@ -44,7 +47,9 @@ export const proposeSetMapMetadataInputShape = {
   mapType: z.number().int().min(1).max(9).optional(),
   regionMapSection: u8.optional(),
   caveOrType: u8.optional(),
+  bikingAllowed: z.boolean().optional(),
   flags: u8.optional(),
+  floorNum: z.number().int().min(-128).max(127).optional(),
   battleType: u8.optional(),
   description: z.string().max(500).optional(),
 } as const;
@@ -89,7 +94,9 @@ export async function proposeSetMapMetadata(
     mapType?: number;
     regionMapSection?: number;
     caveOrType?: number;
+    bikingAllowed?: boolean;
     flags?: number;
+    floorNum?: number;
     battleType?: number;
     description?: string;
   },
@@ -112,13 +119,15 @@ export async function proposeSetMapMetadata(
   if (oldHeader.length !== 28) return emptyResult('Failed to read full map header.');
   const newHeader = new Uint8Array(oldHeader);
 
-  // MapHeader field offsets (from header.ts):
+  // MapHeader field offsets (pret `struct MapHeader`, matching header.ts):
   //   0x10 musicId u16
   //   0x14 regionMapSection u8
   //   0x15 caveOrType u8
   //   0x16 weather u8
   //   0x17 mapType u8
-  //   0x1A flags u8
+  //   0x18 bikingAllowed u8 (bool8 - allow_cycling)
+  //   0x19 flags u8 (bit0 allowEscaping, bit1 allowRunning, bits 2..7 showMapName)
+  //   0x1A floorNum s8
   //   0x1B battleType u8
   const changed: string[] = [];
   if (args.musicId !== undefined) {
@@ -142,9 +151,17 @@ export async function proposeSetMapMetadata(
     newHeader[0x17] = args.mapType;
     changed.push('mapType');
   }
+  if (args.bikingAllowed !== undefined) {
+    newHeader[0x18] = args.bikingAllowed ? 0x01 : 0x00;
+    changed.push('bikingAllowed');
+  }
   if (args.flags !== undefined) {
-    newHeader[0x1a] = args.flags;
+    newHeader[0x19] = args.flags;
     changed.push('flags');
+  }
+  if (args.floorNum !== undefined) {
+    newHeader[0x1a] = args.floorNum & 0xff;
+    changed.push('floorNum');
   }
   if (args.battleType !== undefined) {
     newHeader[0x1b] = args.battleType;
