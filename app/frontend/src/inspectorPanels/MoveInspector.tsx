@@ -12,12 +12,16 @@ import type { BattleMoveEntry, ProjectManifest } from '@rom-editor/shared';
 import './MoveInspector.css';
 
 // Phase S.10 - MoveInspector. Surfaces every important attribute of a
-// battle move (type, category, power, accuracy, PP, priority,
+// battle move (type, derived damage class, power, accuracy, PP, priority,
 // secondary-effect chance, target, description) plus back-references
 // (which species learn it and at what level). Each back-reference is
 // click-through via useSelection so the operator can walk
 // "move → species that learn it → that species' Pokémon inspector"
 // without ever leaving the dock.
+//
+// The damage class is DERIVED, not stored: Gen-3 decides physical/special
+// from the move's type (0 power = status), so the inspector shows it but
+// never offers to write it back into the struct's padding byte.
 //
 // Selection id forms supported:
 //   - synthetic: "move_45" (binary-ROM workspaces)
@@ -87,7 +91,6 @@ export function MoveInspector({
   const [draftPp, setDraftPp] = useState(0);
   const [draftPriority, setDraftPriority] = useState(0);
   const [draftType, setDraftType] = useState(0);
-  const [draftSplit, setDraftSplit] = useState(0);
   const [draftTarget, setDraftTarget] = useState(0);
   const [draftSecondary, setDraftSecondary] = useState(0);
 
@@ -103,7 +106,6 @@ export function MoveInspector({
     setDraftPp(move.pp);
     setDraftPriority(move.priority);
     setDraftType(move.type);
-    setDraftSplit(move.split);
     setDraftTarget(move.target);
     setDraftSecondary(move.secondaryEffectChance);
     setEditing(true);
@@ -119,7 +121,6 @@ export function MoveInspector({
       if (draftPp !== move.pp) fields['pp'] = draftPp;
       if (draftPriority !== move.priority) fields['priority'] = draftPriority;
       if (draftType !== move.type) fields['type'] = draftType;
-      if (draftSplit !== move.split) fields['split'] = draftSplit;
       if (draftTarget !== move.target) fields['target'] = draftTarget;
       if (draftSecondary !== move.secondaryEffectChance)
         fields['secondaryEffectChance'] = draftSecondary;
@@ -215,7 +216,10 @@ export function MoveInspector({
         <div className="move-inspector__name">{moveName}</div>
         <div className="move-inspector__sub">
           <span className="move-inspector__type-chip">{typeLabel}</span>
-          <span className="move-inspector__split-chip">
+          <span
+            className="move-inspector__split-chip"
+            title="Gen-3 damage class - derived from the move's type, not stored in the ROM"
+          >
             <span aria-hidden>{split.icon}</span> {split.label}
           </span>
         </div>
@@ -312,20 +316,6 @@ export function MoveInspector({
               </select>
             </label>
           )}
-          <label className="move-inspector__num-field">
-            <span>Category</span>
-            <select
-              value={draftSplit}
-              data-testid="move-inspector-edit-split"
-              onChange={(e) =>
-                setDraftSplit(Number.parseInt(e.target.value, 10))
-              }
-            >
-              <option value="0">◇ Status</option>
-              <option value="1">⚔ Physical</option>
-              <option value="2">✦ Special</option>
-            </select>
-          </label>
           <label className="move-inspector__num-field">
             <span>Target</span>
             <select

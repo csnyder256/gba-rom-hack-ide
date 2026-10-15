@@ -2624,7 +2624,9 @@ const SPECIES_FIELD_LAYOUT: Readonly<Record<string, { offset: number; bytes: 1 |
 //   +0x00 u8 effect, +0x01 u8 power, +0x02 u8 type, +0x03 u8 accuracy
 //   +0x04 u8 pp, +0x05 u8 secondaryEffectChance
 //   +0x06 u8 target, +0x07 s8 priority
-//   +0x08 u8 flags, +0x09 u8 split
+//   +0x08 u8 flags, +0x09..0x0B padding (3 bytes, must stay 0x00)
+// There is no stored damage-class byte: Gen-3 decides physical/special from
+// the move's type, so the engine derives it and nothing here may write 0x09.
 const MOVE_FIELD_LAYOUT: Readonly<Record<string, { offset: number; bytes: 1; signed?: boolean }>> = {
   effect: { offset: 0x00, bytes: 1 },
   power: { offset: 0x01, bytes: 1 },
@@ -2635,7 +2637,6 @@ const MOVE_FIELD_LAYOUT: Readonly<Record<string, { offset: number; bytes: 1; sig
   target: { offset: 0x06, bytes: 1 },
   priority: { offset: 0x07, bytes: 1, signed: true },
   flags: { offset: 0x08, bytes: 1 },
-  split: { offset: 0x09, bytes: 1 },
 };
 
 // 44-byte Item struct (FRLG/Emerald):

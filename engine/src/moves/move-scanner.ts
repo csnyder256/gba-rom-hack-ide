@@ -51,7 +51,8 @@ export interface BattleMovesTable {
   /** Iter 99 (UW-3-T18) - parsed BattleMove records in table-index
    *  order (MOVE_NONE sentinel at index 0). Each entry carries
    *  effect/power/type/accuracy/pp/secondaryEffectChance/target/
-   *  priority/flags/split for the binary-rom lifter. */
+   *  priority/flags for the binary-rom lifter, plus the Gen-3 damage
+   *  class derived from type + power. */
   readonly moves: ReadonlyArray<BattleMove>;
 }
 

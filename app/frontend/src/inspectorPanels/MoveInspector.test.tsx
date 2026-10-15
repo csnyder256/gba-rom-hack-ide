@@ -234,6 +234,22 @@ describe('MoveInspector (Phase S.10)', () => {
     expect(screen.getByTestId('move-inspector-advanced').textContent).toMatch(/#87/);
   });
 
+  it('shows the derived Gen-3 damage class and offers no writable Category control', () => {
+    const sel: EntityRef = { kind: 'move', id: 'MOVE_TACKLE' };
+    render(
+      <MoveInspector
+        selection={sel}
+        manifest={makeManifest({ battleMoves: [tackle] })}
+        sessionId="s1"
+      />,
+    );
+    // Tackle is Normal-typed, so the Gen-3 class is Physical - derived from
+    // the type, never read from the struct's 0x09 padding byte.
+    expect(screen.getByText(/Physical/)).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('move-inspector-edit-btn'));
+    expect(screen.queryByTestId('move-inspector-edit-split')).not.toBeInTheDocument();
+  });
+
   it('renders an Edit stats button when sessionId is present', () => {
     const sel: EntityRef = { kind: 'move', id: 'MOVE_TACKLE' };
     render(

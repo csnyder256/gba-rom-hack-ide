@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   BATTLE_MOVE_STRUCT_SIZE_BYTES,
+  MOVE_SPLIT_PHYSICAL,
+  MOVE_SPLIT_SPECIAL,
+  MOVE_SPLIT_STATUS,
   parseBattleMove,
 } from './move.js';
 
@@ -15,7 +18,8 @@ function buildMoveBytes(opts: {
   target?: number;
   priority?: number;
   flags?: number;
-  split?: number;
+  /** First of the three mandatory zero padding bytes at 0x09..0x0B. */
+  pad0?: number;
   padA?: number;
   padB?: number;
 }): Uint8Array {
@@ -30,7 +34,7 @@ function buildMoveBytes(opts: {
   // priority is signed i8; convert to unsigned byte representation.
   b[7] = (opts.priority ?? 0) & 0xff;
   b[8] = opts.flags ?? 0;
-  b[9] = opts.split ?? 0;
+  b[9] = opts.pad0 ?? 0; // padding byte 0x09 (NOT a damage-class byte)
   b[10] = opts.padA ?? 0;
   b[11] = opts.padB ?? 0;
   return b;
@@ -92,6 +96,38 @@ describe('parseBattleMove - happy paths', () => {
     const r = parseBattleMove(bytes, 0);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.isEmptySentinel).toBe(true);
+  });
+});
+
+describe('parseBattleMove - Gen-3 damage class is derived, never read from ROM', () => {
+  it('classifies a Normal-type damaging move as Physical (1)', () => {
+    // Tackle: Normal (type 0), 40 power.
+    const r = parseBattleMove(
+      buildMoveBytes({ power: 40, type: 0, accuracy: 100, pp: 35 }),
+      0,
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.move.split).toBe(MOVE_SPLIT_PHYSICAL);
+  });
+
+  it('classifies an Electric-type damaging move as Special (2)', () => {
+    // Thunder: Electric (type 13), 110 power.
+    const r = parseBattleMove(
+      buildMoveBytes({ power: 110, type: 13, accuracy: 70, pp: 10 }),
+      0,
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.move.split).toBe(MOVE_SPLIT_SPECIAL);
+  });
+
+  it('classifies a 0-power move as Status (0) regardless of type', () => {
+    // Thunder Wave: Electric type but 0 power.
+    const r = parseBattleMove(
+      buildMoveBytes({ power: 0, type: 13, accuracy: 100, pp: 20 }),
+      0,
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.move.split).toBe(MOVE_SPLIT_STATUS);
   });
 });
 
@@ -160,7 +196,25 @@ describe('parseBattleMove - failure modes', () => {
     if (!r.ok) expect(r.failure.kind).toBe('power_out_of_range');
   });
 
-  it('rejects nonzero padding byte 10 (strongest signal)', () => {
+  it('rejects nonzero padding byte 9 (0x09 is padding, not a damage class)', () => {
+    const bytes = buildMoveBytes({
+      type: 0,
+      accuracy: 100,
+      pp: 10,
+      pad0: 1,
+    });
+    const r = parseBattleMove(bytes, 0);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.failure.kind).toBe('padding_nonzero');
+      if (r.failure.kind === 'padding_nonzero') {
+        expect(r.failure.paddingOffset).toBe(9);
+        expect(r.failure.observedByte).toBe(1);
+      }
+    }
+  });
+
+  it('rejects nonzero padding byte 10 (three-byte zero-padding signal)', () => {
     const bytes = buildMoveBytes({
       type: 0,
       accuracy: 100,

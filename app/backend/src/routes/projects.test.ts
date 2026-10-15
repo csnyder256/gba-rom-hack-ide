@@ -3730,6 +3730,22 @@ describe('species/move/item struct-field routes', () => {
     expect(body.error.message).toContain('priority');
   });
 
+  it('move-fields: refuses to write the 0x09 padding byte (no stored damage class)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${sessionId}/binary-rom-edit/move-fields`,
+      payload: {
+        sourceFileOffset: moveOffset,
+        fields: { split: 1 },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    const body = res.json() as ProjectErrorResponse;
+    expect(body.error.message).toContain("Unknown field 'split'");
+    // The padding byte must be untouched: 0x09 is not a damage-class slot.
+    expect(readFileSync(gbaPath)[moveOffset + 0x09]).toBe(0);
+  });
+
   it('item-fields: patches price u16 + pocket u8', async () => {
     const res = await app.inject({
       method: 'POST',

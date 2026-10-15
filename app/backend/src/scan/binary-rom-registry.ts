@@ -1743,7 +1743,9 @@ const liftExperienceCurvesSystem: ManifestLifter = (row, ctx) =>
 /** moves_system → manifest.battleMoves[] (iter 99 NEW lifter)
  *  Reads `battleMovesTable.moves[]` exposing each move's full 12-byte
  *  BattleMove struct (effect, power, type, accuracy, pp,
- *  secondaryEffectChance, target, priority, flags, split).
+ *  secondaryEffectChance, target, priority, flags) plus the Gen-3 damage
+ *  class the engine derives from type + power (there is no stored split
+ *  byte - 0x09..0x0B are padding).
  *  Iter-97 pattern: scanner now exposes per-record data; this lifter
  *  consumes it. Name + typeName are resolved by the cross-ref pass
  *  (cross-refs 5+6 - moveNames + typeNames lookups). */
