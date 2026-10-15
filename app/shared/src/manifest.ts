@@ -425,7 +425,9 @@ export interface BattleMoveEntry {
   readonly target: number;
   readonly priority: number;
   readonly flags: number;
-  /** 0 = status, 1 = physical, 2 = special (vanilla convention). */
+  /** Gen-3 damage class - DERIVED from the move's type + power
+   *  (0 = status, 1 = physical, 2 = special). Gen-3 has no stored
+   *  split byte; the struct's 0x09 byte is padding. */
   readonly split: number;
   readonly sourceTableOffset: number;
   /** Iter 99 cross-ref outputs (populated when complementary lifters ran). */

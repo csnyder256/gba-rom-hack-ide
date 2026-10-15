@@ -1,7 +1,7 @@
 /**
  * Gen-3 BattleMove struct parser - Phase UW-2 / Category 2+4 substrate.
  *
- * Per pret/pokefirered + pret/pokeemerald `include/battle.h`, every move
+ * Per pret/pokefirered + pret/pokeemerald `include/pokemon.h`, every move
  * (vanilla 354 + Struggle, heavy-hacks like Radical Red can expand to
  * 800+) has a 12-byte entry in a flat `gBattleMoves` array. Layout:
  *
@@ -15,22 +15,37 @@
  *     u8  target;        // 0x06 - MOVE_TARGET_* (0..0x80 bitmask)
  *     i8  priority;      // 0x07 - signed (-7..+5 typically)
  *     u8  flags;         // 0x08 - bitmask (FLAG_MAKES_CONTACT etc.)
- *     u8  split;         // 0x09 - physical/special/status (Emerald-onwards
- *                        //         this is a separate field; FireRed
- *                        //         derives from type so the byte is 0)
- *     u8  padding[2];    // 0x0A..0x0B - both ZERO in vanilla
+ *     u8  padding[3];    // 0x09..0x0B - all three MUST be 0x00
  *   };  // 12 bytes
  *
+ * The decomp declares only those nine one-byte fields; the retail carts
+ * carry a 12-byte record because the structure is padded out to a multiple
+ * of 4. Bulbapedia's "Move data structure (Generation III)" documents the
+ * same shape (padding = 3 bytes at offset 9, "each one of those bytes
+ * should be set to 0x00") and gives the retail POUND fingerprint
+ * `00 28 00 64 23 00 00 00 33 00 00 00` - flags at 0x08 = 0x33 followed by
+ * three zero bytes at 0x09..0x0B.
+ *
+ * Gen-3 has NO stored per-move damage class: physical vs special is decided
+ * by the move's TYPE (Fire/Water/Grass/Electric/Psychic/Ice/Dragon/Dark are
+ * special; Normal/Fighting/Flying/Poison/Ground/Rock/Bug/Ghost/Steel are
+ * physical; a 0-power move is a status move). The `split` field exposed
+ * below is therefore DERIVED from `type` + `power` via the shared
+ * `deriveGen3MoveSplit` helper - it is never read out of the struct, and
+ * byte 0x09 is validated as padding instead of being mislabelled as a
+ * damage-class byte.
+ *
  * Detection signature (per move):
- *   - `type` ≤ 17 (Gen-3 has 18 types; 0=Normal, 17=Dark/Fairy varies)
+ *   - `type` ≤ 17 (Gen-3 has 18 types; 0=Normal, 17=Dark)
  *   - `accuracy` ≤ 100
  *   - `secondaryEffectChance` ≤ 100
  *   - `pp` in [1, 40] (1=Sketch-like, 40=Sing-equivalent)
  *   - `priority` in [-7, +5] (signed byte; values 0xF9..0xFF or 0x00..0x05)
  *   - `power` ≤ 250 (a few effect-driven moves exceed nominal max; 250 cap
  *      excludes obviously-corrupt bytes)
- *   - `padding[0]` == 0 and `padding[1]` == 0 (strongest signal - random
- *      bytes hit two-zero-padding only ~0.0015% of the time)
+ *   - `padding[0]` == 0, `padding[1]` == 0 and `padding[2]` == 0 (strongest
+ *      signal - random bytes hit three-zero-padding only ~0.00002% of the
+ *      time)
  *
  * Combined false-positive rate per random 12-byte slice: < 1 in 10^8
  * thanks to padding + type + accuracy + pp constraints. A run of ≥80
@@ -45,6 +60,8 @@
  * PD 5: structural-only - no baked move-table offsets; works on any
  * Gen-3 cart whose BattleMove struct retains the published layout.
  */
+
+import { deriveGen3MoveSplit } from '../battle/damage.js';
 
 /** Size of one Gen-3 BattleMove struct in bytes. */
 export const BATTLE_MOVE_STRUCT_SIZE_BYTES = 12;
@@ -71,6 +88,33 @@ export const BATTLE_MOVE_PP_MAX = 40;
 export const BATTLE_MOVE_PRIORITY_MIN = -7;
 export const BATTLE_MOVE_PRIORITY_MAX = 5;
 
+/** Offset of the first of the three mandatory zero padding bytes. */
+export const BATTLE_MOVE_PADDING_OFFSET = 0x09;
+/** Number of trailing padding bytes in the 12-byte record (0x09..0x0B). */
+export const BATTLE_MOVE_PADDING_BYTES = 3;
+
+/** Gen-3 damage-class codes (the numeric convention the manifest uses). */
+export const MOVE_SPLIT_STATUS = 0;
+export const MOVE_SPLIT_PHYSICAL = 1;
+export const MOVE_SPLIT_SPECIAL = 2;
+
+/**
+ * Map a move's `type` + `power` to the numeric Gen-3 damage class used by
+ * the manifest/UI: 0 = status, 1 = physical, 2 = special. Thin numeric
+ * wrapper over `deriveGen3MoveSplit` so callers never re-derive the
+ * physical-type set.
+ */
+export function gen3DamageClassCode(type: number, power: number): number {
+  switch (deriveGen3MoveSplit(type, power)) {
+    case 'status':
+      return MOVE_SPLIT_STATUS;
+    case 'physical':
+      return MOVE_SPLIT_PHYSICAL;
+    default:
+      return MOVE_SPLIT_SPECIAL;
+  }
+}
+
 export interface BattleMove {
   readonly effect: number;
   readonly power: number;
@@ -81,6 +125,11 @@ export interface BattleMove {
   readonly target: number;
   readonly priority: number;
   readonly flags: number;
+  /**
+   * Gen-3 damage class, DERIVED from `type` + `power` (0 = status,
+   * 1 = physical, 2 = special). Gen-3 decides the class by type, so there
+   * is no byte to read; the struct's 0x09 byte is padding, not a split.
+   */
   readonly split: number;
 }
 
@@ -105,6 +154,9 @@ export type BattleMoveParseResult =
  *
  * All-zero entries are accepted as the canonical MOVE_NONE sentinel
  * (`isEmptySentinel: true`); the scanner uses this for table anchor.
+ *
+ * `move.split` is derived from `type` + `power`; the struct's 0x09..0x0B
+ * bytes are validated as zero padding and never surfaced.
  */
 export function parseBattleMove(bytes: Uint8Array, offset: number): BattleMoveParseResult {
   if (offset + BATTLE_MOVE_STRUCT_SIZE_BYTES > bytes.length) {
@@ -129,9 +181,9 @@ export function parseBattleMove(bytes: Uint8Array, offset: number): BattleMovePa
   const priorityUnsigned = bytes[offset + 7]!;
   const priority = (priorityUnsigned << 24) >> 24;
   const flags = bytes[offset + 8]!;
-  const split = bytes[offset + 9]!;
-  const padA = bytes[offset + 10]!;
-  const padB = bytes[offset + 11]!;
+  const pad0 = bytes[offset + 9]!;
+  const pad1 = bytes[offset + 10]!;
+  const pad2 = bytes[offset + 11]!;
 
   const move: BattleMove = {
     effect,
@@ -143,7 +195,7 @@ export function parseBattleMove(bytes: Uint8Array, offset: number): BattleMovePa
     target,
     priority,
     flags,
-    split,
+    split: gen3DamageClassCode(type, power),
   };
 
   // All-zero entry = MOVE_NONE sentinel - accept it as valid.
@@ -157,20 +209,23 @@ export function parseBattleMove(bytes: Uint8Array, offset: number): BattleMovePa
     target === 0 &&
     priorityUnsigned === 0 &&
     flags === 0 &&
-    split === 0 &&
-    padA === 0 &&
-    padB === 0;
+    pad0 === 0 &&
+    pad1 === 0 &&
+    pad2 === 0;
 
   if (isEmptySentinel) {
     return { ok: true, move, isEmptySentinel: true };
   }
 
-  // Strongest check: padding bytes both zero.
-  if (padA !== 0) {
-    return { ok: false, failure: { kind: 'padding_nonzero', paddingOffset: 10, observedByte: padA } };
+  // Strongest check: all three padding bytes zero.
+  if (pad0 !== 0) {
+    return { ok: false, failure: { kind: 'padding_nonzero', paddingOffset: 9, observedByte: pad0 } };
   }
-  if (padB !== 0) {
-    return { ok: false, failure: { kind: 'padding_nonzero', paddingOffset: 11, observedByte: padB } };
+  if (pad1 !== 0) {
+    return { ok: false, failure: { kind: 'padding_nonzero', paddingOffset: 10, observedByte: pad1 } };
+  }
+  if (pad2 !== 0) {
+    return { ok: false, failure: { kind: 'padding_nonzero', paddingOffset: 11, observedByte: pad2 } };
   }
   // Type ≤ 17.
   if (type > BATTLE_MOVE_TYPE_MAX) {

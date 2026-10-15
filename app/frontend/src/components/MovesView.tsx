@@ -9,16 +9,20 @@ import './SpeciesView.css';
  * Phase M.2 - Battle moves workspace.
  *
  * Left rail: filterable move list. Right pane: editable struct fields
- * (power, accuracy, PP, type, effect, priority, split, target,
- * secondary effect chance, flags). Writes via the existing
- * /binary-rom-edit/move-fields route.
+ * (power, accuracy, PP, type, effect, priority, target, secondary effect
+ * chance, flags) plus a read-only Gen-3 damage class derived from the
+ * move's type. Writes via the existing /binary-rom-edit/move-fields route.
  */
 
-const SPLIT_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
-  { value: 0, label: '0 - Status (no damage)' },
-  { value: 1, label: '1 - Physical' },
-  { value: 2, label: '2 - Special' },
-];
+// Gen-3 has no stored damage-class byte: the physical/special split is a
+// function of the move's TYPE (and 0 power = status). The manifest's
+// `split` field carries the class the engine derives, so it is shown
+// read-only here rather than written back to the struct's padding byte.
+const SPLIT_LABEL: Readonly<Record<number, string>> = {
+  0: 'Status (no damage)',
+  1: 'Physical',
+  2: 'Special',
+};
 
 const TARGET_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
   { value: 0x00, label: 'Selected target' },
@@ -265,7 +269,6 @@ function MoveEditor({
     target: move.target,
     priority: move.priority,
     flags: move.flags,
-    split: move.split,
   };
   const [values, setValues] = useState<Record<string, number>>({ ...initial });
   const [state, setState] = useState<
@@ -375,6 +378,15 @@ function MoveEditor({
     );
   }
 
+  function ReadOnlyField({ name, value }: { name: string; value: string }): JSX.Element {
+    return (
+      <label className="species-field">
+        <span>{name}</span>
+        <input type="text" value={value} readOnly data-testid="moves-damage-class" />
+      </label>
+    );
+  }
+
   // Phase O.30 - Enter saves, Esc reverts all move fields.
   const onKeyDownFields = useEditFormKeyboard({
     canSave: canSave && state.kind !== 'saving',
@@ -403,7 +415,10 @@ function MoveEditor({
           <NumberField name="Power" field="power" min={0} max={255} />
           <NumberField name="Accuracy" field="accuracy" min={0} max={255} />
           <NumberField name="PP" field="pp" min={0} max={255} />
-          <EnumField name="Damage class" field="split" options={SPLIT_OPTIONS} />
+          <ReadOnlyField
+            name="Damage class"
+            value={SPLIT_LABEL[move.split] ?? `Unknown (${move.split})`}
+          />
           <EnumField name="Type" field="type" options={TYPE_OPTIONS_VANILLA} />
         </div>
       </fieldset>
