@@ -1498,12 +1498,34 @@ export function registerBinaryRomMovementActionByteRoute({
 //                                       weather?, mapType?, battleType?,
 //                                       caveOrType?, flags? } }
 //   → patches the relevant u8/u16 fields inside the 28-byte MapHeader
-//     struct in place. Music id is u16 at +0x14, regionMapSectionId
-//     is u8 at +0x16, weather u8 at +0x18, mapType u8 at +0x19,
-//     battleType u8 at +0x1A, flags u8 at +0x1B (FRLG; RSE differs).
-//     We don't try to detect family here - caller supplies the offset
-//     and the fields layout matches both FRLG + RSE for the fields we
-//     expose (music + section id are at the same offsets).
+//     struct in place. Caller supplies the header's file offset.
+//
+// Offsets are the pret-decompiled MapHeader layout, read live from
+// `include/global.fieldmap.h` in pret/pokefirered, pret/pokeruby and
+// pret/pokeemerald (the three vanilla families; all three agree on
+// 0x10..0x17 and on 0x1B):
+//
+//   0x00 ptr mapLayout        0x10 u16 music              0x1B u8 battleType
+//   0x04 ptr events           0x12 u16 mapLayoutId
+//   0x08 ptr mapScripts       0x14 u8  regionMapSectionId
+//   0x0C ptr connections      0x15 u8  cave
+//                             0x16 u8  weather
+//                             0x17 u8  mapType
+//
+// The two bytes between mapType and battleType are the only
+// family-dependent part of the struct, and they are exactly the bytes
+// this route's `flags` field targets:
+//
+//   FRLG    0x18 u8 bikingAllowed       0x19 u8 escape/run/showName bits
+//                                      0x1A s8 floorNum
+//   Ruby    0x18 u8 filler              0x19 u8 escapeRope
+//                                      0x1A u8 escape/run/showName bits
+//   Emerald 0x18 u8 filler[2]           0x1A u8 cycling/escape/run/showName
+//
+// So `flags` is resolved per-ROM from the cartridge header's game code
+// (the same BPRE/BPGE rule the frontend already applies) and lands at
+// 0x19 on FRLG, 0x1A on everything else. Every other field is written
+// at the one offset all three families share.
 // ─────────────────────────────────────────────────────────────────────
 
 export interface BinaryRomEditMapHeaderRequest {
@@ -1523,24 +1545,65 @@ export interface BinaryRomEditMapHeaderResponse {
   readonly mapHeaderOffset: number;
   readonly fieldsWritten: ReadonlyArray<string>;
   readonly backupCreated: boolean;
+  /** MapHeader family the write layout was resolved from. */
+  readonly family: MapHeaderFamily;
+  /** Game code read from the cartridge header, or null when unreadable. */
+  readonly gameCode: string | null;
 }
 
-// MapHeader struct layout (FRLG/RSE) - the fields we touch share offsets
-// across families. Verified against pret/pokefirered include/global.map.h.
+/** MapHeader layout families that differ in the 0x18..0x1A bytes. */
+export type MapHeaderFamily = 'frlg' | 'rse';
+
+/** MapHeader field offsets shared by FRLG, Ruby/Sapphire and Emerald
+ *  (pret `struct MapHeader`; identical in all three vanilla headers). */
 const MAP_HEADER_FIELD_OFFSETS: Readonly<
   Record<
-    keyof BinaryRomEditMapHeaderRequest['fields'],
+    Exclude<keyof BinaryRomEditMapHeaderRequest['fields'], 'flags'>,
     { offset: number; bytes: 1 | 2 }
   >
 > = {
-  musicId: { offset: 0x14, bytes: 2 },
-  regionMapSectionId: { offset: 0x16, bytes: 1 },
-  weather: { offset: 0x18, bytes: 1 },
-  mapType: { offset: 0x19, bytes: 1 },
-  battleType: { offset: 0x1a, bytes: 1 },
-  flags: { offset: 0x1b, bytes: 1 },
-  caveOrType: { offset: 0x17, bytes: 1 },
+  musicId: { offset: 0x10, bytes: 2 },
+  regionMapSectionId: { offset: 0x14, bytes: 1 },
+  caveOrType: { offset: 0x15, bytes: 1 },
+  weather: { offset: 0x16, bytes: 1 },
+  mapType: { offset: 0x17, bytes: 1 },
+  battleType: { offset: 0x1b, bytes: 1 },
 };
+
+/** The `flags` byte offset per family: FRLG keeps the escape/run/show-name
+ *  bitfield at 0x19 (0x1A is floorNum); Ruby and Emerald keep it at 0x1A
+ *  (0x19 is escapeRope in Ruby and filler in Emerald). */
+export const MAP_HEADER_FLAGS_OFFSET_BY_FAMILY: Readonly<Record<MapHeaderFamily, number>> = {
+  frlg: 0x19,
+  rse: 0x1a,
+};
+
+/** Game codes whose MapHeader stores the flag bitfield at 0x19. */
+const FRLG_GAME_CODES: ReadonlySet<string> = new Set(['BPRE', 'BPGE']);
+
+/**
+ * Resolve the MapHeader family from the cartridge header's game code.
+ *
+ * BPRE / BPGE (FireRed / LeafGreen, including the hacks that keep their
+ * parent's code) → `frlg`. Ruby, Sapphire, Emerald and anything with an
+ * unreadable or unrecognised code → `rse`, which is also the layout the
+ * engine's `parseMapHeader` reads, so an unresolved ROM still round-trips
+ * through the editor instead of having its bytes written to an offset the
+ * reader never looks at.
+ */
+export function resolveMapHeaderFamily(gameCode: string | null): MapHeaderFamily {
+  return gameCode !== null && FRLG_GAME_CODES.has(gameCode) ? 'frlg' : 'rse';
+}
+
+/** Field → offset table for one resolved family (`flags` included). */
+export function mapHeaderFieldOffsets(
+  family: MapHeaderFamily,
+): Readonly<Record<keyof BinaryRomEditMapHeaderRequest['fields'], { offset: number; bytes: 1 | 2 }>> {
+  return {
+    ...MAP_HEADER_FIELD_OFFSETS,
+    flags: { offset: MAP_HEADER_FLAGS_OFFSET_BY_FAMILY[family], bytes: 1 },
+  };
+}
 
 export function registerBinaryRomMapHeaderEditRoute({
   app,
@@ -1599,12 +1662,18 @@ export function registerBinaryRomMapHeaderEditRoute({
         );
       }
 
+      // Resolve the family (and therefore the flags byte offset) from the
+      // cartridge header this edit is landing in.
+      const gameCode = engineRom.readGbaHeader(romBytes)?.gameCode ?? null;
+      const family = resolveMapHeaderFamily(gameCode);
+      const offsets = mapHeaderFieldOffsets(family);
+
       // Validate fields + bounds.
       const fieldEntries = Object.entries(body.fields).filter(
         ([, v]) => typeof v === 'number',
-      ) as Array<[keyof typeof MAP_HEADER_FIELD_OFFSETS, number]>;
+      ) as Array<[keyof typeof offsets, number]>;
       for (const [key, value] of fieldEntries) {
-        const spec = MAP_HEADER_FIELD_OFFSETS[key];
+        const spec = offsets[key];
         if (!spec) {
           return errorResponse(
             reply,
@@ -1648,7 +1717,7 @@ export function registerBinaryRomMapHeaderEditRoute({
       const view = new DataView(out.buffer, out.byteOffset, out.length);
       const fieldsWritten: string[] = [];
       for (const [key, value] of fieldEntries) {
-        const spec = MAP_HEADER_FIELD_OFFSETS[key];
+        const spec = offsets[key];
         if (!spec) continue;
         const at = body.mapHeaderOffset + spec.offset;
         if (spec.bytes === 1) {
@@ -1675,6 +1744,8 @@ export function registerBinaryRomMapHeaderEditRoute({
         mapHeaderOffset: body.mapHeaderOffset,
         fieldsWritten,
         backupCreated,
+        family,
+        gameCode,
       };
       return response;
     },
