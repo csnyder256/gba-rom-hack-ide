@@ -11,6 +11,7 @@ import type {
   ScanResponse,
 } from '@rom-editor/shared';
 import { createServer } from '../server.js';
+import { maps as mapsApi } from '@rom-introspection/engine';
 
 describe('projects route', () => {
   let app: FastifyInstance;
@@ -2235,14 +2236,17 @@ describe('object-event-fields edit route', () => {
 // ─────────────────────────────────────────────────────────────────────
 // Phase O.54 - Map-header-edit write route integration test.
 //
-// MapHeader struct (FRLG/RSE shared offsets for the editable fields):
-//   +0x14 u16 musicId
-//   +0x16 u8  regionMapSectionId
-//   +0x17 u8  caveOrType
-//   +0x18 u8  weather
-//   +0x19 u8  mapType
-//   +0x1A u8  battleType
-//   +0x1B u8  flags
+// MapHeader struct offsets, per pret/pokefirered + pret/pokeruby +
+// pret/pokeemerald `include/global.fieldmap.h` (all three agree on
+// 0x10..0x17 and 0x1B):
+//   +0x10 u16 musicId
+//   +0x12 u16 mapLayoutId
+//   +0x14 u8  regionMapSectionId
+//   +0x15 u8  caveOrType (pret: `cave`)
+//   +0x16 u8  weather
+//   +0x17 u8  mapType
+//   +0x19 u8  flags   (FRLG; Ruby/Emerald put it at +0x1A)
+//   +0x1B u8  battleType
 //
 // Map-header struct is 28 bytes. Route accepts a flat `fields`
 // object (unlike the multi-edit array shape on object-event-fields).
@@ -2275,16 +2279,20 @@ describe('map-header edit route', () => {
     // Unique stamp per test.
     const stamp = Buffer.from(`${Date.now()}-${Math.random()}`, 'utf8');
     stamp.copy(buf, 0x500, 0, Math.min(stamp.length, 0x100));
-    // Seed a MapHeader at headerOffset:
-    //   musicId=350, regionMapSectionId=88, caveOrType=0, weather=2,
-    //   mapType=1, battleType=0, flags=1.
-    buf.writeUInt16LE(350, headerOffset + 0x14);
-    buf[headerOffset + 0x16] = 88;
-    buf[headerOffset + 0x17] = 0;
-    buf[headerOffset + 0x18] = 2;
+    // Seed a MapHeader at headerOffset using the pret offsets:
+    //   mapLayout pointer (valid ROM pointer so the engine parser accepts
+    //   the header), musicId=350, regionMapSectionId=88, caveOrType=0,
+    //   weather=2, mapType=1, flags=1 (FRLG +0x19), battleType=0.
+    //   +0x1A is FRLG's floorNum and stays 0.
+    buf.writeUInt32LE(0x08000000 + 0x1500, headerOffset + 0x00);
+    buf.writeUInt16LE(350, headerOffset + 0x10);
+    buf[headerOffset + 0x14] = 88;
+    buf[headerOffset + 0x15] = 0;
+    buf[headerOffset + 0x16] = 2;
+    buf[headerOffset + 0x17] = 1;
     buf[headerOffset + 0x19] = 1;
     buf[headerOffset + 0x1a] = 0;
-    buf[headerOffset + 0x1b] = 1;
+    buf[headerOffset + 0x1b] = 0;
     gbaPath = path.join(projectDir, 'firered.gba');
     writeFileSync(gbaPath, buf);
     const openRes = await app.inject({
@@ -2306,7 +2314,7 @@ describe('map-header edit route', () => {
     rmSync(projectDir, { recursive: true, force: true });
   });
 
-  it('patches musicId u16 + creates .bak on first edit', async () => {
+  it('patches musicId u16 at +0x10 + creates .bak on first edit', async () => {
     const res = await app.inject({
       method: 'POST',
       url: `/api/projects/${sessionId}/binary-rom-edit/map-header`,
@@ -2320,15 +2328,23 @@ describe('map-header edit route', () => {
       mapHeaderOffset: number;
       fieldsWritten: string[];
       backupCreated: boolean;
+      family: string;
+      gameCode: string | null;
     };
     expect(body.fieldsWritten).toEqual(['musicId']);
     expect(body.backupCreated).toBe(true);
+    expect(body.family).toBe('frlg');
+    expect(body.gameCode).toBe('BPRE');
     const out = readFileSync(gbaPath);
-    expect(out.readUInt16LE(headerOffset + 0x14)).toBe(367);
+    expect(out.readUInt16LE(headerOffset + 0x10)).toBe(367);
+    // The old table put musicId at +0x14, which is regionMapSectionId and
+    // cave on every Gen-3 family - a music edit silently rewrote both.
+    expect(out[headerOffset + 0x14]).toBe(88);
+    expect(out[headerOffset + 0x15]).toBe(0);
     expect(existsSync(`${gbaPath}.bak`)).toBe(true);
   });
 
-  it('patches multiple u8 fields at distinct offsets', async () => {
+  it('patches multiple u8 fields at their documented offsets', async () => {
     const res = await app.inject({
       method: 'POST',
       url: `/api/projects/${sessionId}/binary-rom-edit/map-header`,
@@ -2345,17 +2361,19 @@ describe('map-header edit route', () => {
     });
     expect(res.statusCode).toBe(200);
     const out = readFileSync(gbaPath);
-    expect(out[headerOffset + 0x16]).toBe(100);
-    expect(out[headerOffset + 0x18]).toBe(5);
-    expect(out[headerOffset + 0x19]).toBe(2);
-    expect(out[headerOffset + 0x1a]).toBe(1);
-    expect(out[headerOffset + 0x1b]).toBe(3);
-    // Bytes before/after the header should be untouched.
-    expect(out[headerOffset + 0x13]).toBe(0); // before musicId
-    expect(out[headerOffset + 0x1c]).toBe(0); // past last field
+    expect(out[headerOffset + 0x14]).toBe(100); // regionMapSectionId
+    expect(out[headerOffset + 0x16]).toBe(5); // weather
+    expect(out[headerOffset + 0x17]).toBe(2); // mapType
+    expect(out[headerOffset + 0x19]).toBe(3); // flags (FRLG)
+    expect(out[headerOffset + 0x1b]).toBe(1); // battleType
+    // Untouched neighbours inside the struct: mapLayoutId (u16 at +0x12),
+    // FRLG floorNum (+0x1A), and the byte past battleType.
+    expect(out.readUInt16LE(headerOffset + 0x12)).toBe(0);
+    expect(out[headerOffset + 0x1a]).toBe(0);
+    expect(out[headerOffset + 0x1c]).toBe(0);
   });
 
-  it('caveOrType writes to +0x17, NOT +0x18 (verifies layout)', async () => {
+  it('caveOrType writes to +0x15 and leaves weather/mapType alone', async () => {
     const res = await app.inject({
       method: 'POST',
       url: `/api/projects/${sessionId}/binary-rom-edit/map-header`,
@@ -2366,8 +2384,92 @@ describe('map-header edit route', () => {
     });
     expect(res.statusCode).toBe(200);
     const out = readFileSync(gbaPath);
-    expect(out[headerOffset + 0x17]).toBe(7); // caveOrType
-    expect(out[headerOffset + 0x18]).toBe(2); // weather unchanged
+    expect(out[headerOffset + 0x15]).toBe(7); // caveOrType / pret `cave`
+    expect(out[headerOffset + 0x16]).toBe(2); // weather unchanged
+    expect(out[headerOffset + 0x17]).toBe(1); // mapType unchanged
+  });
+
+  it('writes flags at +0x19 on FRLG and +0x1A on an RSE ROM', async () => {
+    // Same header bytes in both ROMs; only the cartridge game code differs,
+    // and that is what moves the flags byte.
+    const rseDir = mkdtempSync(path.join(tmpdir(), 'rom-editor-map-header-rse-'));
+    try {
+      const rseBuf = Buffer.alloc(0x2000, 0);
+      rseBuf.write('POKEMON EMER', 0xa0, 'ascii');
+      rseBuf.write('BPEE', 0xac, 'ascii');
+      rseBuf.write('01', 0xb0, 'ascii');
+      rseBuf[0xb2] = 0x96;
+      rseBuf[0xbc] = 0;
+      const stamp = Buffer.from(`${Date.now()}-${Math.random()}`, 'utf8');
+      stamp.copy(rseBuf, 0x500, 0, Math.min(stamp.length, 0x100));
+      rseBuf.writeUInt32LE(0x08000000 + 0x1500, headerOffset + 0x00);
+      rseBuf.writeUInt16LE(350, headerOffset + 0x10);
+      rseBuf[headerOffset + 0x14] = 88;
+      rseBuf[headerOffset + 0x17] = 1;
+      rseBuf[headerOffset + 0x1a] = 1; // RSE flags
+      rseBuf[headerOffset + 0x1b] = 0;
+      const rsePath = path.join(rseDir, 'emerald.gba');
+      writeFileSync(rsePath, rseBuf);
+      const openRes = await app.inject({
+        method: 'POST',
+        url: '/api/projects/open-from-file',
+        payload: { filePath: rsePath },
+      });
+      expect(openRes.statusCode).toBe(200);
+      const rseBody = openRes.json() as {
+        session: { id: string; projectRoot: string };
+      };
+      const managed = require('node:fs').readdirSync(rseBody.session.projectRoot);
+      const rseGba = managed.find((f: string) => f.endsWith('.gba'));
+      const rseGbaPath = rseGba
+        ? path.join(rseBody.session.projectRoot, rseGba)
+        : rsePath;
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/projects/${rseBody.session.id}/binary-rom-edit/map-header`,
+        payload: { mapHeaderOffset: headerOffset, fields: { flags: 5 } },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { family: string; gameCode: string | null };
+      expect(body.family).toBe('rse');
+      expect(body.gameCode).toBe('BPEE');
+      const rseOut = readFileSync(rseGbaPath);
+      expect(rseOut[headerOffset + 0x1a]).toBe(5); // RSE flags
+      expect(rseOut[headerOffset + 0x19]).toBe(0); // untouched filler/escapeRope
+      expect(rseOut[headerOffset + 0x1b]).toBe(0); // battleType untouched
+    } finally {
+      rmSync(rseDir, { recursive: true, force: true });
+    }
+  });
+
+  it('round-trips every written field through the engine MapHeader parser', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${sessionId}/binary-rom-edit/map-header`,
+      payload: {
+        mapHeaderOffset: headerOffset,
+        fields: {
+          musicId: 411,
+          regionMapSectionId: 77,
+          caveOrType: 4,
+          weather: 3,
+          mapType: 8, // indoor
+          battleType: 2, // elite four
+        },
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    const parsed = mapsApi.parseMapHeader(readFileSync(gbaPath), headerOffset);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    // The editor reads these back through exactly this parser after a save.
+    expect(parsed.header.musicId).toBe(411);
+    expect(parsed.header.regionMapSection).toBe(77);
+    expect(parsed.header.caveOrType).toBe(4);
+    expect(parsed.header.weather).toBe(3);
+    expect(parsed.header.mapType).toBe(8);
+    expect(parsed.header.battleType).toBe(2);
   });
 
   it('rejects out-of-u8 weather (256) with 400 internal_error', async () => {
