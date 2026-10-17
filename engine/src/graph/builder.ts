@@ -1461,7 +1461,7 @@ export function buildRelationshipGraph(args: BuildRelationshipGraphArgs): Relati
   }
 
   // 3.10) Phase-8 P8-T4: species evolutions. The species-evolutions
-  // detector found `gEvolutionTable` (5-slot blocks × 40 bytes per
+  // detector found `gEvolutionTable` (5-slot blocks × 30 bytes per
   // species). For every species:N node from P8-T1 we (a) enrich its
   // detail with the evolution chain, and (b) emit one typed
   // `evolves_into` edge per populated slot from species:N → species:T

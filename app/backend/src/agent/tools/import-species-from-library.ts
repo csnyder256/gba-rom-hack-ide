@@ -9,6 +9,7 @@ import type {
   SpeciesEntry,
   SpeciesEvolutionEntry,
 } from '@rom-editor/shared';
+import { species as speciesApi } from '@rom-introspection/engine';
 import { readManifest } from '../../scan/manifest-io.js';
 import type { ToolContext } from '../types.js';
 import { proposePatch, ProposePatchError } from './propose-patch.js';
@@ -18,8 +19,10 @@ import { proposePatch, ProposePatchError } from './propose-patch.js';
  *  manifest schema. Holds for all corpus targets (FireRed / Unbound /
  *  Radical Red), which are all Gen-3-format. */
 const SPECIES_STRUCT_SIZE = 28;
-/** 5 evolution slots × 8 bytes per slot = 40-byte EvolutionBlock. */
-const EVOLUTION_BLOCK_SIZE = 40;
+/** 5 evolution slots × 6 bytes per slot = 30-byte EvolutionBlock
+ *  (pret `struct Evolution` is three u16s with no padding word).
+ *  Sourced from the engine so the copy window matches the reader. */
+const EVOLUTION_BLOCK_SIZE = speciesApi.EVOLUTION_BLOCK_SIZE_BYTES;
 
 export const IMPORT_SPECIES_FROM_LIBRARY_TOOL_NAME = 'import_species_from_library';
 
@@ -29,7 +32,7 @@ export const IMPORT_SPECIES_FROM_LIBRARY_DESCRIPTION =
   'to identify which species to pull and from where.\n\n' +
   'v1 supports `mode: "replace_slot"` only - for each pair ' +
   '(sourceIds[i], targetIds[i]), the source species\'s 28-byte BaseStats ' +
-  'struct + 40-byte EvolutionBlock OVERWRITE the target slot at the same ' +
+  'struct + 30-byte EvolutionBlock OVERWRITE the target slot at the same ' +
   'species index in the target ROM. No table expansion; targetIds default ' +
   'to sourceIds when omitted (1:1 mapping). Names + learnsets are NOT ' +
   'imported by v1 - Gen-3 names live in a separate string table reachable ' +
@@ -276,7 +279,7 @@ export async function importSpeciesFromLibrary(
       }
     }
 
-    // Evolution block (40 bytes). Optional - many species have no entry
+    // Evolution block (30 bytes). Optional - many species have no entry
     // in the evolution table; skip silently in that case.
     const srcEvo = findEvolutionEntry(sourceManifest.speciesEvolutions, srcId);
     const tgtEvo = findEvolutionEntry(targetManifest.speciesEvolutions, tgtId);
@@ -310,7 +313,7 @@ export async function importSpeciesFromLibrary(
       offset: tgtEvoOff,
       beforeBytes: bytesToHex(targetRom.bytes, tgtEvoOff, EVOLUTION_BLOCK_SIZE),
       afterBytes: bytesToHex(sourceRom.bytes, srcEvoOff, EVOLUTION_BLOCK_SIZE),
-      note: `import species #${srcId} → slot #${tgtId} (40-byte evolution block)`,
+      note: `import species #${srcId} → slot #${tgtId} (30-byte evolution block)`,
     });
     evolutionEditCount += 1;
   }

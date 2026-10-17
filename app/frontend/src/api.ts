@@ -1856,7 +1856,7 @@ export interface BinaryRomEditEvolutionSlotResponseLike {
   readonly backupCreated: boolean;
 }
 
-/** Phase M.5 - patch a single evolution slot (8-byte struct). */
+/** Phase M.5 - patch a single evolution slot (6-byte struct). */
 export async function editBinaryRomEvolutionSlot(
   sessionId: string,
   args: {
@@ -1886,10 +1886,10 @@ export interface BinaryRomEditEvolutionDeleteResponseLike {
 }
 
 /** Phase O.15 - delete one evolution slot from a species. Shifts
- *  subsequent slots left by 8 bytes within the fixed 5-slot
- *  EvolutionBlock window, zero-fills the slot that previously held
- *  the LAST populated entry (= new EVO_NONE terminator). No
- *  relocation, no count byte. */
+ *  subsequent slots left by 6 bytes within the fixed 5-slot
+ *  EvolutionBlock window (30 bytes per species), zero-fills the slot
+ *  that previously held the LAST populated entry (= new EVO_NONE
+ *  terminator). No relocation, no count byte. */
 export async function editBinaryRomEvolutionDelete(
   sessionId: string,
   args: {

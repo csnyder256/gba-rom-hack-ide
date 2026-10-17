@@ -223,7 +223,7 @@ export interface BinaryRewritePointerEdit {
  * Write a span of raw bytes at a known offset inside the .gba.
  *
  * Used by AI-1.5b's cross-project species importer: structures like
- * the 28-byte species table row, the 40-byte evolution table row,
+ * the 28-byte species table row, the 30-byte evolution table row,
  * and the TM/HM compatibility bitfield are non-text binary blobs the
  * existing binary_replace_text / binary_write_text edits can't carry.
  * binary_write_bytes is the generic "fixed-length byte span" primitive

@@ -1,9 +1,12 @@
 /**
  * propose_edit_evolution - Phase 3.28.
  *
- * Rewrites the 40-byte evolution block for a species in gEvolutionTable.
- * Each species has 5 slots; each slot is 8 bytes: {method u16, param
- * u16, targetSpecies u16, padding u16}.
+ * Rewrites the evolution block for a species in gEvolutionTable.
+ * Each species has 5 slots (EVOS_PER_MON); each slot is the pret
+ * `struct Evolution` - 6 bytes: {method u16, param u16, targetSpecies
+ * u16} with no padding word - so a block is 30 bytes. The bytes are
+ * produced by the engine's `encodeEvolutionBlock`, so the writer and
+ * the reader cannot drift apart.
  *
  * Inputs:
  *   - speciesId: u16
@@ -35,7 +38,7 @@ import { proposePatch, ProposePatchError } from './propose-patch.js';
 export const PROPOSE_EDIT_EVOLUTION_TOOL_NAME = 'propose_edit_evolution';
 
 export const PROPOSE_EDIT_EVOLUTION_DESCRIPTION =
-  'Rewrite a species\' evolution block (5 slots × 8 bytes = 40 bytes).\n\n' +
+  'Rewrite a species\' evolution block (5 slots × 6 bytes = 30 bytes).\n\n' +
   'Inputs:\n' +
   '  - `speciesId`: u16.\n' +
   '  - `evolutions`: array of up to 5 { method, param, targetSpecies }\n' +
@@ -112,22 +115,16 @@ export async function proposeEditEvolution(
     );
   }
 
-  const blockOffset = table.tableStart + args.speciesId * 40;
-  const oldBytes = new Uint8Array(rom.bytes.subarray(blockOffset, blockOffset + 40));
+  const blockOffset = table.tableStart + args.speciesId * speciesApi.EVOLUTION_BLOCK_SIZE_BYTES;
+  const oldBytes = new Uint8Array(
+    rom.bytes.subarray(blockOffset, blockOffset + speciesApi.EVOLUTION_BLOCK_SIZE_BYTES),
+  );
 
-  // Build the new 40-byte block.
-  const newBytes = new Uint8Array(40);
-  for (let i = 0; i < args.evolutions.length && i < 5; i++) {
-    const e = args.evolutions[i]!;
-    const slotOff = i * 8;
-    newBytes[slotOff + 0] = e.method & 0xff;
-    newBytes[slotOff + 1] = (e.method >>> 8) & 0xff;
-    newBytes[slotOff + 2] = e.param & 0xff;
-    newBytes[slotOff + 3] = (e.param >>> 8) & 0xff;
-    newBytes[slotOff + 4] = e.targetSpecies & 0xff;
-    newBytes[slotOff + 5] = (e.targetSpecies >>> 8) & 0xff;
-    // padding 0x06..0x07 = 0 (already zero in Uint8Array)
-  }
+  // Build the new block through the engine encoder (single source of
+  // truth for the on-disk slot stride); slots not supplied stay EVO_NONE.
+  const newBytes = speciesApi.encodeEvolutionBlock(
+    args.evolutions.slice(0, speciesApi.EVOLUTION_SLOTS_PER_SPECIES),
+  );
 
   if (oldBytes.every((b, i) => b === newBytes[i])) {
     return emptyResult(args.speciesId, 'No changes - block already matches requested evolutions.');
@@ -154,7 +151,7 @@ export async function proposeEditEvolution(
   return {
     proposal,
     speciesId: args.speciesId,
-    bytesWritten: 40,
+    bytesWritten: speciesApi.EVOLUTION_BLOCK_SIZE_BYTES,
     message: `Rewrote evolution block for species ${String(args.speciesId)}.`,
   };
 }
