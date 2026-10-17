@@ -4,6 +4,7 @@ import {
   EVOLUTION_STRUCT_SIZE_BYTES as SLOT,
 } from './evolution.js';
 import { scanEvolutionTable } from './evolution-scanner.js';
+import { speciesEvolutionsDetector } from '../detectors/species-evolutions.js';
 
 /** Plant a populated evolution slot. */
 function plantSlot(
@@ -189,5 +190,172 @@ describe('scanEvolutionTable - rejection cases', () => {
     expect(() =>
       scanEvolutionTable(new Uint8Array(0x1000), { minPopulatedBlocks: 0 }),
     ).toThrow();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Real-ROM layout regression (2026-10-17).
+//
+// pret/pokefirered + pret/pokeemerald + pret/pokeruby all define
+//
+//   struct Evolution { u16 method; u16 param; u16 targetSpecies; };
+//
+// - three u16s, alignment 2, so sizeof == 6 with no tail padding, and
+// `gEvolutionTable[NUM_SPECIES][EVOS_PER_MON]` with EVOS_PER_MON == 5
+// makes every per-species block exactly 30 bytes.
+//
+// The fixture below is built BY HAND from pret's own evolution.h values
+// (u16 LE written at a 6-byte stride), deliberately not via any engine
+// constant or encoder, so it stays an independent oracle: if the reader
+// ever drifts back to the phantom 0x06 padding field / 8-byte slot /
+// 40-byte block, these tests fail on data that is byte-for-byte what a
+// retail cart contains.
+// ─────────────────────────────────────────────────────────────────────
+
+/** Real vanilla FireRed/LeafGreen level-up evolution chains, keyed by
+ *  the source species id (0 = SPECIES_NONE sentinel, all-zero block).
+ *  Values copied from pret/pokefirered src/data/pokemon/evolution.h. */
+const VANILLA_FRLG_CHAINS: ReadonlyArray<
+  ReadonlyArray<{ method: number; param: number; targetSpecies: number }>
+> = [
+  [], // 0  SPECIES_NONE - all-zero sentinel block
+  [{ method: 4, param: 16, targetSpecies: 2 }], // 1  Bulbasaur  → Ivysaur
+  [{ method: 4, param: 32, targetSpecies: 3 }], // 2  Ivysaur    → Venusaur
+  [], // 3  Venusaur
+  [{ method: 4, param: 16, targetSpecies: 5 }], // 4  Charmander → Charmeleon
+  [{ method: 4, param: 36, targetSpecies: 6 }], // 5  Charmeleon → Charizard
+  [], // 6  Charizard
+  [{ method: 4, param: 16, targetSpecies: 8 }], // 7  Squirtle   → Wartortle
+  [{ method: 4, param: 36, targetSpecies: 9 }], // 8  Wartortle  → Blastoise
+  [], // 9  Blastoise
+  [{ method: 4, param: 7, targetSpecies: 11 }], // 10 Caterpie   → Metapod
+  [{ method: 4, param: 10, targetSpecies: 12 }], // 11 Metapod   → Butterfree
+  [], // 12 Butterfree
+  [{ method: 4, param: 7, targetSpecies: 14 }], // 13 Weedle     → Kakuna
+  [{ method: 4, param: 10, targetSpecies: 15 }], // 14 Kakuna     → Beedrill
+  [], // 15 Beedrill
+  [{ method: 4, param: 18, targetSpecies: 17 }], // 16 Pidgey     → Pidgeotto
+  [{ method: 4, param: 36, targetSpecies: 18 }], // 17 Pidgeotto  → Pidgeot
+  [], // 18 Pidgeot
+  [{ method: 4, param: 20, targetSpecies: 20 }], // 19 Rattata    → Raticate
+  [], // 20 Raticate
+  [{ method: 4, param: 20, targetSpecies: 22 }], // 21 Spearow    → Fearow
+  [], // 22 Fearow
+  [{ method: 4, param: 22, targetSpecies: 24 }], // 23 Ekans      → Arbok
+  [], // 24 Arbok
+  // 25 Pikachu → Raichu is EVO_ITEM (Thunder Stone) in pret; encoded
+  // with its real method 7 and a placeholder stone param (the reader
+  // treats param as method-dependent and does not validate it).
+  [{ method: 7, param: 1, targetSpecies: 26 }],
+  [], // 26 Raichu
+  [{ method: 4, param: 22, targetSpecies: 28 }], // 27 Sandshrew  → Sandslash
+  [], // 28 Sandslash
+  [{ method: 4, param: 16, targetSpecies: 30 }], // 29 Nidoran-F  → Nidorina
+  [{ method: 7, param: 1, targetSpecies: 31 }], // 30 Nidorina   → Nidoqueen (Moon Stone)
+  [], // 31 Nidoqueen
+  [{ method: 4, param: 16, targetSpecies: 33 }], // 32 Nidoran-M  → Nidorino
+  [{ method: 7, param: 1, targetSpecies: 34 }], // 33 Nidorino   → Nidoking (Moon Stone)
+  [], // 34 Nidoking
+];
+
+/** Build the gEvolutionTable byte image at the REAL 6-byte slot /
+ *  30-byte block stride. Hand-rolled on purpose (see header comment). */
+function buildRealEvolutionTableBytes(
+  chains: ReadonlyArray<ReadonlyArray<{ method: number; param: number; targetSpecies: number }>>,
+): Buffer {
+  const SLOT = 6;
+  const BLOCK = 30;
+  const out = Buffer.alloc(chains.length * BLOCK);
+  for (let species = 0; species < chains.length; species++) {
+    const slots = chains[species]!;
+    for (let i = 0; i < slots.length; i++) {
+      const at = species * BLOCK + i * SLOT;
+      const s = slots[i]!;
+      out.writeUInt16LE(s.method, at + 0x00);
+      out.writeUInt16LE(s.param, at + 0x02);
+      out.writeUInt16LE(s.targetSpecies, at + 0x04);
+    }
+  }
+  return out;
+}
+
+describe('scanEvolutionTable - real 6-byte-slot / 30-byte-block ROM layout', () => {
+  it('finds a table laid out exactly like pret gEvolutionTable', () => {
+    const buf = Buffer.alloc(0x4000);
+    const tableAt = 0x200;
+    buildRealEvolutionTableBytes(VANILLA_FRLG_CHAINS).copy(buf, tableAt);
+
+    const r = scanEvolutionTable(buf);
+    expect(r).not.toBeNull();
+    if (r === null) return;
+
+    // The scanner's anchor requires a POPULATED slot 0, so it lands on
+    // species 1 (Bulbasaur) - one 30-byte block past the all-zero
+    // SPECIES_NONE sentinel.
+    expect(r.tableStart).toBe(tableAt + 30);
+
+    // Species 1's block must carry Bulbasaur's real evolution.
+    const bulbasaur = r.blocks[0];
+    expect(bulbasaur?.fileOffset).toBe(tableAt + 30);
+    expect(bulbasaur?.populatedSlots.map((s) => [s.method, s.param, s.targetSpecies])).toEqual([
+      [4, 16, 2],
+    ]);
+
+    // Every planted chain must be readable at its real 30-byte stride,
+    // addressed from the table start - this is the assertion that fails
+    // outright when the reader assumes an 8-byte slot (a phantom 0x06
+    // padding word makes every populated block unparseable, and the
+    // scanner returns null).
+    const byOffset = new Map(r.blocks.map((b) => [b.fileOffset, b]));
+    for (let species = 1; species < VANILLA_FRLG_CHAINS.length; species++) {
+      const expected = VANILLA_FRLG_CHAINS[species]!;
+      const block = byOffset.get(tableAt + species * 30);
+      expect(block, `species ${String(species)} block`).toBeDefined();
+      expect(
+        block?.populatedSlots.map((s) => [s.method, s.param, s.targetSpecies]),
+        `species ${String(species)} chains`,
+      ).toEqual(expected.map((e) => [e.method, e.param, e.targetSpecies]));
+    }
+
+    // 21 of the 35 planted species carry at least one evolution.
+    expect(r.populatedBlockCount).toBe(
+      VANILLA_FRLG_CHAINS.filter((c) => c.length > 0).length,
+    );
+  });
+
+  it('does not read a phantom padding word between slots', () => {
+    // Two adjacent populated species at the real stride: if the reader
+    // consumed a u16 at 0x06 it would read species 2's method as
+    // "padding" and reject species 1's block. Assert species 1's slot 1
+    // is the EVO_NONE terminator (i.e. it starts at +0x06, not +0x08).
+    const buf = Buffer.alloc(0x1000);
+    buildRealEvolutionTableBytes(VANILLA_FRLG_CHAINS).copy(buf, 0x100);
+    const r = scanEvolutionTable(buf);
+    expect(r).not.toBeNull();
+    if (r === null) return;
+    const bulbasaur = r.blocks.find((b) => b.fileOffset === 0x100 + 30);
+    expect(bulbasaur?.slots.length).toBe(5);
+    expect(bulbasaur?.slots[1]?.fileOffset).toBe(0x100 + 30 + 6);
+    expect(bulbasaur?.slots[1]?.isEmpty).toBe(true);
+  });
+
+  it('is detected end-to-end by the species_evolutions detector', () => {
+    const buf = Buffer.alloc(0x4000);
+    buildRealEvolutionTableBytes(VANILLA_FRLG_CHAINS).copy(buf, 0x200);
+    const rom = {
+      bytes: new Uint8Array(buf),
+      byteLength: buf.length,
+      path: 'fixture.gba',
+    } as unknown as Parameters<typeof speciesEvolutionsDetector.detect>[0];
+    const coverage = { addClassified: () => undefined } as unknown as Parameters<
+      typeof speciesEvolutionsDetector.detect
+    >[1];
+    const detection = speciesEvolutionsDetector.detect(rom, coverage);
+    expect(detection.status).toBe('detected');
+    if (detection.status === 'detected') {
+      expect(detection.data.populatedBlockCount).toBe(
+        VANILLA_FRLG_CHAINS.filter((c) => c.length > 0).length,
+      );
+    }
   });
 });

@@ -4,8 +4,8 @@
  * Per §15 Phase 8, the species system covers - beyond P8-T1's base
  * stats - evolutions, learnsets, TM/HM compat, abilities, hidden
  * abilities, forms, mega/regional/custom forms, etc. P8-T4 adds
- * EVOLUTIONS: the Gen-3 gEvolutionTable is a flat array of 40-byte
- * per-species blocks (5 × 8-byte Evolution slots each).
+ * EVOLUTIONS: the Gen-3 gEvolutionTable is a flat array of 30-byte
+ * per-species blocks (5 × 6-byte Evolution slots each).
  *
  * Coverage contribution: every byte of the discovered gEvolutionTable
  * is registered as `table` class at confidence 0.9.
@@ -73,7 +73,7 @@ export const speciesEvolutionsDetector: RomDetector<SpeciesEvolutionsReport> = {
         evidence: [
           makeEvidence({
             kind: 'heuristic',
-            summary: `scanned ${String(rom.byteLength)} bytes for a run of ≥${String(EVOLUTION_SCAN_MIN_BLOCKS)} 40-byte evolution blocks with ≥2 populated (non-EVO_NONE) blocks - none found`,
+            summary: `scanned ${String(rom.byteLength)} bytes for a run of ≥${String(EVOLUTION_SCAN_MIN_BLOCKS)} 30-byte evolution blocks with ≥2 populated (non-EVO_NONE) blocks - none found`,
             weight: 1.0,
             detail: {
               romByteLength: rom.byteLength,

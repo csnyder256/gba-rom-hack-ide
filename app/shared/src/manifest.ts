@@ -617,7 +617,7 @@ export interface SpeciesEvolutionEntry {
   readonly id: string;
   readonly speciesIndex: number;
   readonly slots: ReadonlyArray<SpeciesEvolutionSlot>;
-  /** Absolute file offset of the 40-byte EvolutionBlock. */
+  /** Absolute file offset of the 30-byte EvolutionBlock. */
   readonly sourceFileOffset: number;
 }
 

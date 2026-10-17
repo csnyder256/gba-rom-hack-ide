@@ -684,14 +684,18 @@ function SpeciesEvolutionsEditor({
       {/* Phase O.14 - fill the next empty slot in the fixed 5-slot
           window. Gen-3 EVOS_PER_MON=5 is a hard cap; populated slots
           are contiguous from index 0 so the next empty slot's file
-          offset = sourceFileOffset + populatedCount * 8. */}
+          offset = sourceFileOffset + populatedCount * 6 (each slot is
+          the 6-byte pret `struct Evolution`). */}
       <AddEvolutionButton entry={evo} manifest={manifest} />
     </fieldset>
   );
 }
 
 const EVOS_PER_MON = 5;
-const EVOLUTION_SLOT_SIZE = 8;
+/** Bytes per evolution slot: `struct Evolution { u16 method; u16 param;
+ *  u16 targetSpecies; }` - 6 bytes, no padding word (pret/pokefirered,
+ *  pokeemerald, pokeruby). A per-species block is 5 × 6 = 30 bytes. */
+const EVOLUTION_SLOT_SIZE = 6;
 
 function AddEvolutionButton({
   entry,

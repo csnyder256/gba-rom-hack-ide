@@ -25,6 +25,7 @@ export {
   EVOLUTION_SPECIES_MAX,
   EVOLUTION_STRUCT_SIZE_BYTES,
   EVO_NONE,
+  encodeEvolutionBlock,
   parseEvolutionBlock,
   parseEvolutionSlot,
   type Evolution,

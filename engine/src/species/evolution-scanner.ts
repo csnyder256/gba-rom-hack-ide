@@ -1,26 +1,26 @@
 /**
  * Gen-3 gEvolutionTable scanner - Phase 8 P8-T4.
  *
- * Scans the ROM for a run of consecutive 40-byte per-species
- * evolution blocks (5 × 8-byte Evolution slots each). Each slot has
+ * Scans the ROM for a run of consecutive 30-byte per-species
+ * evolution blocks (5 × 6-byte Evolution slots each). Each slot has
  * either method=EVO_NONE+all-zero (legitimate "no evolution") or a
- * valid method/param/targetSpecies/zero-padding combination. A
+ * valid method/param/targetSpecies combination. A
  * run of ≥ `minBlocks` consecutive valid blocks is the table.
  *
- * Algorithm: walk the ROM at 4-byte stride (the table is 4-byte
- * aligned; per-species blocks are 40 bytes apart so the stride must
- * divide 40, and 4 is the natural u16-aligned step). At every
- * candidate position try to parse a per-species block (40 bytes);
- * greedily walk consecutive 40-byte blocks until parse fails. First
- * convincing run wins.
+ * Algorithm: walk the ROM at 2-byte stride (the table is u16-aligned
+ * because `struct Evolution` is three u16s; a 30-byte block is NOT a
+ * multiple of 4, so a 4-byte stride would step over half the legal
+ * table alignments). At every candidate position try to parse a
+ * per-species block (30 bytes); greedily walk consecutive 30-byte
+ * blocks until parse fails. First convincing run wins.
  *
- * Vanilla FireRed has ~411 blocks (411 × 40 = 16440 bytes); CFRU /
+ * Vanilla FireRed has ~411 blocks (411 × 30 = 12330 bytes); CFRU /
  * expansion 700+. Min 8 default avoids accidental matches while
  * allowing tiny test ROMs (only ~12 blocks in the smoke 4th case)
  * to be detected.
  *
- * Performance: ~80 ms on a 16 MiB ROM (cheap per-candidate fast-
- * reject at the very first slot's padding check).
+ * Performance: ~150 ms on a 16 MiB ROM (cheap per-candidate fast-
+ * reject at the very first slot).
  *
  * PD 5: structural-only - no baked offsets; PD 8: every byte of the
  * discovered table is registered in coverage.
@@ -28,6 +28,9 @@
 
 import {
   EVOLUTION_BLOCK_SIZE_BYTES,
+  EVOLUTION_METHOD_MAX,
+  EVOLUTION_SPECIES_MAX,
+  EVO_NONE,
   parseEvolutionBlock,
   type EvolutionBlock,
 } from './evolution.js';
@@ -88,7 +91,7 @@ export function scanEvolutionTable(
     throw new Error(`maxBlocks must be >= minBlocks, got ${String(maxBlocks)}`);
   }
 
-  const stride = 4;
+  const stride = 2;
   const limit = bytes.length - EVOLUTION_BLOCK_SIZE_BYTES;
   for (let candidateStart = 0; candidateStart <= limit; candidateStart += stride) {
     // OPTIMIZATION + correctness: require SLOT 0 of the first block
@@ -98,8 +101,8 @@ export function scanEvolutionTable(
     // ROM has megabytes of zero-fill, and a candidate just before
     // the real table can have its block 0 overlap the real first
     // populated slot at a non-zero slot index (e.g. slot 4),
-    // incorrectly anchoring 32 bytes before the real start. Slot 0
-    // populated == "the first 8 bytes at the candidate position are
+    // incorrectly anchoring 24 bytes before the real start. Slot 0
+    // populated == "the first 6 bytes at the candidate position are
     // a real Evolution struct, not zero-fill" - the tightest possible
     // anchor that works structurally.
     // Trade-off: in vanilla, gEvolutionTable[0] = SPECIES_NONE
@@ -110,6 +113,19 @@ export function scanEvolutionTable(
     // synthetic fixtures where species 0 itself is populated, the
     // alignment is exact. The graph builder must be aware of this
     // when associating blocks to species ids.
+    // Fast pre-reject, inlined. A run can only anchor where slot 0 is a
+    // populated, plausible Evolution slot; reading just `method` and
+    // `targetSpecies` here skips the block/slot construction inside
+    // parseEvolutionBlock for ~99.9% of positions. That is what keeps the
+    // u16 stride affordable on a 16 MiB ROM (the inlined filter is exactly
+    // the set of slot-0 outcomes that would fail the full parse anyway).
+    const slot0Method =
+      (bytes[candidateStart] ?? 0) | ((bytes[candidateStart + 1] ?? 0) << 8);
+    if (slot0Method === EVO_NONE || slot0Method > EVOLUTION_METHOD_MAX) continue;
+    const slot0Target =
+      (bytes[candidateStart + 4] ?? 0) | ((bytes[candidateStart + 5] ?? 0) << 8);
+    if (slot0Target === 0 || slot0Target > EVOLUTION_SPECIES_MAX) continue;
+
     const firstBlockResult = parseEvolutionBlock(bytes, candidateStart);
     if (!firstBlockResult.ok) continue;
     if (firstBlockResult.block.slots[0]!.isEmpty) continue;

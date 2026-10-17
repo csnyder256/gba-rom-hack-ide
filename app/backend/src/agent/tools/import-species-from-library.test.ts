@@ -13,7 +13,7 @@ import { writeManifest } from '../../scan/manifest-io.js';
 import { importSpeciesFromLibrary } from './import-species-from-library.js';
 
 const SPECIES_STRUCT_SIZE = 28;
-const EVOLUTION_BLOCK_SIZE = 40;
+const EVOLUTION_BLOCK_SIZE = 30;
 
 /** Tiny manifest builder that pins species[] + speciesEvolutions[]
  *  to specific offsets so we can drive the importer through every

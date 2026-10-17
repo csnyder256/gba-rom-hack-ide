@@ -31,7 +31,7 @@ export const PROPOSE_PATCH_DESCRIPTION =
   'the current pointer value before writing.\n' +
   '  - binary_write_bytes: write raw bytes at an offset in the .gba. ' +
   'Used by import_species_from_library to push the 28-byte species struct ' +
-  '+ 40-byte evolution table row + TM/HM bitfield into the target ROM. ' +
+  '+ 30-byte evolution table row + TM/HM bitfield into the target ROM. ' +
   '`beforeBytes` and `afterBytes` are hex (no separators, no 0x prefix); ' +
   'empty `beforeBytes` = free-space mode (applier requires the slot to be ' +
   'fill bytes). v1 requires `beforeBytes.length === afterBytes.length` ' +

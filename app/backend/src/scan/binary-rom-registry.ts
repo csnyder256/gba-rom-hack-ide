@@ -1512,7 +1512,7 @@ const liftSpeciesEvolutions: ManifestLifter = (row, ctx) =>
       // Phase O.14 - surface ALL species even with 0 populated evolutions
       // so the operator can ADD an evolution to a previously non-evolving
       // species (Mew, Mewtwo, all stage-3 finals, etc.). sourceFileOffset
-      // is still meaningful and points to the 40-byte 5-slot window.
+      // is still meaningful and points to the 30-byte 5-slot window.
       const slots: SpeciesEvolutionSlot[] = populated.map((s) => ({
         method: s.method,
         param: s.param,

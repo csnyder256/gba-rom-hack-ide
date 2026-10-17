@@ -37,6 +37,7 @@ import {
   maps,
   rom as engineRom,
   scripts as engineScripts,
+  species as engineSpecies,
   text as engineText,
   world,
 } from '@rom-introspection/engine';
@@ -2783,8 +2784,10 @@ export const registerBinaryRomItemFieldsRoute = makeStructFieldRoute(
 // ─────────────────────────────────────────────────────────────────────
 // Phase M.5 - Species evolution + learnset writers
 //
-// Evolution slot (8 bytes per pret/pokefirered):
-//   +0x00 u16 method, +0x02 u16 param, +0x04 u16 targetSpecies, +0x06 u16 pad
+// Evolution slot (6 bytes - pret/pokefirered, pokeemerald and pokeruby
+// all define `struct Evolution { u16 method; u16 param; u16 targetSpecies; }`,
+// with no padding word; EVOS_PER_MON = 5 makes a per-species block 30 bytes):
+//   +0x00 u16 method, +0x02 u16 param, +0x04 u16 targetSpecies
 //
 // Learnset entry (2 bytes packed):
 //   bits 0..8  = move id (9 bits)
@@ -2836,7 +2839,10 @@ export function registerBinaryRomEvolutionSlotRoute({
         req.log.error(e);
         return errorResponse(reply, 500, 'internal_error', `Read failed: ${String(e)}`);
       }
-      if (body.slotFileOffset < 0 || body.slotFileOffset + 8 > romBytes.length) {
+      if (
+        body.slotFileOffset < 0 ||
+        body.slotFileOffset + engineSpecies.EVOLUTION_STRUCT_SIZE_BYTES > romBytes.length
+      ) {
         return errorResponse(reply, 400, 'internal_error', 'Slot offset out of bounds');
       }
       const backupPath = `${romPath}.bak`;
@@ -2889,14 +2895,16 @@ export function registerBinaryRomEvolutionSlotRoute({
 // POST /api/projects/:id/binary-rom-edit/species-evolution-delete
 //   body: { blockFileOffset, slotIndex, currentPopulatedCount }
 //
-// Gen-3 stores evolutions as `Evolution[5]` (40 bytes per species).
-// Each slot is 8 bytes { u16 method, u16 param, u16 target, u16 pad }.
+// Gen-3 stores evolutions as `Evolution[EVOS_PER_MON]` - 5 slots of 6
+// bytes each, i.e. a 30-byte block per species (pret/pokefirered,
+// pokeemerald and pokeruby all define the struct as three u16 fields
+// with no padding word).
 // The engine reads slots sequentially, stopping at the FIRST EVO_NONE
 // (method == 0). So populated slots MUST be contiguous from index 0
 // - a hole truncates trailing evolutions.
 //
 // Strategy: shift slots [slotIndex+1, currentPopulatedCount-1] left
-// by 8 bytes WITHIN the fixed 5-slot window, zero-fill the slot at
+// by 6 bytes WITHIN the fixed 5-slot window, zero-fill the slot at
 // (currentPopulatedCount-1) so it becomes the new EVO_NONE terminator.
 // No pointer or count byte to update - the engine's truncation is
 // driven entirely by the slot.method == 0 sentinel.
@@ -2905,8 +2913,10 @@ export function registerBinaryRomEvolutionSlotRoute({
 // (Gen-3 max). currentPopulatedCount must be 1..5.
 // ─────────────────────────────────────────────────────────────────────
 
-const EVOLUTION_SLOT_SIZE_BYTES = 8;
-const EVOLUTION_SLOTS_PER_BLOCK = 5;
+// Sourced from the engine so the writer can never disagree with the
+// reader's `struct Evolution` layout.
+const EVOLUTION_SLOT_SIZE_BYTES = engineSpecies.EVOLUTION_STRUCT_SIZE_BYTES;
+const EVOLUTION_SLOTS_PER_BLOCK = engineSpecies.EVOLUTION_SLOTS_PER_SPECIES;
 
 export interface BinaryRomEditEvolutionDeleteRequest {
   readonly blockFileOffset: number;
@@ -2987,7 +2997,7 @@ export function registerBinaryRomEvolutionDeleteRoute({
           reply,
           400,
           'internal_error',
-          'EvolutionBlock 40-byte window out of ROM bounds.',
+          'EvolutionBlock 30-byte window out of ROM bounds.',
         );
       }
 
