@@ -12,17 +12,17 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@fastify/websocket": "11.3.1",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@fastify/websocket": "11.3.4",
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@rom-editor/shared": "*",
     "@rom-introspection/engine": "file:../../engine",
-    "fastify": "5.12.5",
+    "fastify": "5.12.7",
     "yauzl": "^3.4.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "22.20.4",
-    "@types/ws": "^8.18.1",
+    "@types/ws": "^8.18.2",
     "@types/yauzl": "^3.4.0",
     "tsx": "4.23.15",
     "typescript": "5.4.5",
