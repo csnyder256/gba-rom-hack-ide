@@ -33,13 +33,13 @@
     "test:watch": "vitest"
   },
   "devDependencies": {
-    "@types/node": "22.20.4",
-    "@vitest/coverage-v8": "5.0.1",
+    "@types/node": "22.20.5",
+    "@vitest/coverage-v8": "5.0.5",
     "typescript": "5.9.3",
-    "vitest": "5.0.1"
+    "vitest": "5.0.5"
   },
   "dependencies": {
-    "@thenick775/mgba-wasm": "2.5.1",
+    "@thenick775/mgba-wasm": "2.6.0",
     "ajv": "^8.20.0"
   }
 }
